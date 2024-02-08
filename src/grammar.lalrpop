@@ -1,0 +1,96 @@
+use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, TypedIdentifier};
+use std::str::FromStr;
+
+
+grammar;
+
+// Lexer
+match {
+    // TODO: comments
+
+    // keywords
+    ";" => SEMICOLON,
+    ":" => COLON,
+    "->" => RIGHT_ARROW,
+    "=>" => FAT_RIGHT_ARROW,
+    "{" => CURLYBOPEN,
+    "}" => CURLYBCLOSE,
+    "||" => OR,
+    "&&" => AND,
+    "==" => EQ,
+    "!=" => NEQ,
+    "="  => ASSIGN,
+    ">"  => GREATER,
+    "<"  => LESS,
+    ">=" => GREATEREQ,
+    "<=" => LESSEQ,
+    "*"  => MULTIPLY,
+    "/"  => DIVIDE,
+    "%"  => MODULO,
+    "+"  => PLUS,
+    "-" => MINUS,
+    "if" => IF,
+    "else" => ELSE,
+    "(" => LPAREN,
+    ")" => RPAREN,
+    "let" => LET,
+    "[" => RBRACKET,
+    "]" => LBRACKET,
+    "true" => TRUE,
+    "false" => FALSE,
+    "fn" => FN,
+    "," => COMMA,
+    "." => DOT,
+    "return" => RETURN,
+    "elif" => ELIF,
+
+    r"[_A-Za-z][_A-Za-z0-9]*" => IDENTIFIER,
+    r"[0-9]+" => NUMBER,
+    r#""([^\\"]|\\[~ntr\\"])*""# => STRING_LITERAL,
+}
+
+pub TopStmt: Stmt = {
+    TopLevelStmts => Stmt { node: StmtKind::Top(<>), location: Location::new(0, 0) },
+}
+
+TopLevelStmts: Vec<Stmt> = {
+    <mut v: (<TopLevelStmt>)*> <e: TopLevelStmt> => { v.push(e); v }
+}
+
+TopLevelStmt: Stmt = {
+    FunDecl => <>,
+}
+
+FunDecl: Stmt = {
+    <l: @L> FN <name: Identifier> LPAREN <parameters: MaybeTypedIdentifiers> RPAREN <return_type: (COLON <Identifier>)?> ASSIGN <body: Expr> <r: @R> => Stmt {
+        node: StmtKind::FunDecl{name, parameters, return_type, body: Box::new(body)},
+        location: Location::new(l, r),
+    }
+}
+
+Expr = Number;
+
+Number: Expr = {
+    <l: @L> <n: NUMBER> <r: @R> => Expr {
+        node: ExprKind::Int(i64::from_str(n).unwrap()),
+        location: Location::new(l, r),
+    }
+}
+
+MaybeTypedIdentifiers: Vec<TypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
+
+MaybeTypedIdentifier: TypedIdentifier = {
+    <name: Identifier> <ty: (COLON <Identifier>)?> => TypedIdentifier {
+        name,
+        ty,
+    }
+}
+
+Identifier: String = IDENTIFIER => <>.to_string();
+
+Separated<T, S>: Vec<T> = {
+    <mut v: (<T> S)*> <e: T?> => match e {
+        None => v,
+        Some(e) => { v.push(e); v }
+    }
+}
