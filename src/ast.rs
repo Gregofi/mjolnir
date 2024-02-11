@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 pub struct Location {
     pub line: usize,
     pub column: usize,
@@ -21,6 +19,7 @@ pub struct Expr {
 
 pub enum ExprKind {
     Int(i64),
+    Identifier(String),
 }
 
 pub struct Stmt {
@@ -35,5 +34,9 @@ pub struct TypedIdentifier {
 
 pub enum StmtKind {
     FunDecl{name: String, parameters: Vec<TypedIdentifier>, return_type: Option<String>, body: Box<Expr>},
+    StructDecl{name: String, fields: Vec<TypedIdentifier>},
+    // We allow writing variants similar to structs.
+    EnumDecl{name: String, variants: Vec<TypedIdentifier>},
+    TraitDecl{name: String, methods: Vec<TypedIdentifier>},
     Top(Vec<Stmt>),
 }

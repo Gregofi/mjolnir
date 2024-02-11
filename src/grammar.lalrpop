@@ -68,7 +68,17 @@ FunDecl: Stmt = {
     }
 }
 
-Expr = Number;
+Expr: Expr = {
+    Number => <>,
+    IdentifierExpr => <>,
+};
+
+IdentifierExpr: Expr = {
+    <l: @L> <id: Identifier> <r: @R> => Expr {
+        node: ExprKind::Identifier(id),
+        location: Location::new(l, r),
+    }
+}
 
 Number: Expr = {
     <l: @L> <n: NUMBER> <r: @R> => Expr {
