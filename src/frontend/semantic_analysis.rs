@@ -1,68 +1,170 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use crate::ast::{Stmt, Expr};
-use anyhow::Result;
-use crate::frontend::utils::SymbolTable;
-use crate::ast::{ExprKind, StmtKind};
+use crate::ast::{Decl, DeclKind, ExprKind, StmtKind, TypedExpr};
+use crate::ast::{Expr, Stmt};
+use crate::frontend::types::{BuiltInType, Type};
+use anyhow::{bail, Context, Result};
 
-/**
- * Does semantic analysis of the AST, checks that
- * - are identifiers are declared.
- * - identifier names are not duplicated.
- * - assignments only happen to lvalues.    TODO: This should not even be possible on grammar
- * level.
- */
-fn semantic_analysis(ast: &Stmt) -> Result<()> {
-    let mut symbols = SymbolTable::<()>::new();
-    symbols.push();
-    analyse_stmt(ast, &mut symbols)
+struct IdentInfo {
+    ty: Rc<Type>,
 }
 
-fn analyse_expr(ast: &Expr, env: &SymbolTable<()>) -> Result<()> {
-    match &ast.node {
-        ExprKind::Int(_) => Ok(()),
-        ExprKind::Identifier(name)  => if env.get(name).is_some() { Ok(()) } else { Err(anyhow::anyhow!("Identifier '{}' not declared", name)) },
+pub struct Environment<T> {
+    identifiers: HashMap<String, T>,
+}
+
+impl<T> Environment<T> {
+    fn new() -> Self {
+        Self {
+            identifiers: HashMap::new(),
+        }
     }
 }
 
-fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<()>) -> Result<()> {
-    match &ast.node {
-        crate::ast::StmtKind::FunDecl { name, parameters, return_type, body } => {
-            env.push();
-            for param in parameters {
-                env.insert(param.name.clone(), ());
-            }
+pub struct SymbolTable<T> {
+    pub identifiers: Vec<Environment<T>>,
+    types: HashMap<String, Rc<Type>>,
+}
 
-            analyse_expr(&body, env)?;
-            env.pop();
-            Ok(())
-        },
-        crate::ast::StmtKind::StructDecl { name, fields } => todo!(),
-        crate::ast::StmtKind::EnumDecl { name, variants } => todo!(),
-        crate::ast::StmtKind::TraitDecl { name, methods } => todo!(),
-        crate::ast::StmtKind::Top(stmts) => {
+impl<T> SymbolTable<T> {
+    fn predefined_types() -> HashMap<String, Rc<Type>> {
+        let mut types = HashMap::new();
+        types.insert("Int".to_string(), Type::BuiltIn(BuiltInType::Int).into());
+        types.insert(
+            "String".to_string(),
+            Type::BuiltIn(BuiltInType::Bool).into(),
+        );
+        types.insert(
+            "Bool".to_string(),
+            Type::BuiltIn(BuiltInType::String).into(),
+        );
+        types
+    }
+
+    pub fn new() -> Self {
+        Self {
+            identifiers: Vec::new(),
+            types: Self::predefined_types(),
+        }
+    }
+
+    pub fn push(&mut self) {
+        self.identifiers.push(Environment::new());
+    }
+
+    pub fn pop(&mut self) {
+        self.identifiers.pop();
+    }
+
+    pub fn insert(&mut self, name: String, value: T) {
+        self.identifiers
+            .last_mut()
+            .unwrap()
+            .identifiers
+            .insert(name, value);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&T> {
+        self.identifiers
+            .iter()
+            .rev()
+            .find_map(|env| env.identifiers.get(name))
+    }
+
+    pub fn get_type(&self, name: &str) -> Option<&Rc<Type>> {
+        self.types.get(name)
+    }
+
+    pub fn insert_type(&mut self, name: String, value: Rc<Type>) {
+        self.types.insert(name, value);
+    }
+}
+
+fn semantic_analysis(ast: &Vec<Decl>) -> Result<()> {
+    let mut symbols = SymbolTable::<IdentInfo>::new();
+    symbols.push();
+    for decl in ast {
+        analyse_decl(decl, &mut symbols)?;
+    }
+    Ok(())
+}
+
+fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExpr> {
+    match &ast.node {
+        ExprKind::Int(v) => Ok(TypedExpr {
+            node: ExprKind::Int(*v),
+            location: ast.location.clone(),
+            ty: env.get_type("Int").unwrap().clone(),
+        }),
+        ExprKind::Identifier(name) => {
+            let id = env.get(name);
+            match id {
+                Some(id) => {
+                    todo!()
+                }
+                None => Err(anyhow::anyhow!("Identifier '{}' not declared", name))?,
+            }
+        }
+        ExprKind::Compound(stmts, expr) => {
             for stmt in stmts {
                 analyse_stmt(stmt, env)?;
             }
-            Ok(())
-        },
+            analyse_expr(expr, env)
+        }
     }
 }
 
+fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
+    match &ast.node {
+        DeclKind::FunDecl {
+            name,
+            parameters,
+            return_type,
+            body,
+        } => {
+            env.push();
+            for param in parameters {
+                let param_type = param
+                    .ty
+                    .as_ref()
+                    .expect("Function parameters must be typed explicitely");
+                let ty = env
+                    .get_type(param_type)
+                    .with_context(|| format!("Type '{}' not declared", param_type))?;
+                env.insert(param.name.clone(), IdentInfo { ty: ty.clone() });
+            }
+
+            analyse_expr(&body, env)?;
+
+            env.pop();
+            Ok(())
+        }
+        DeclKind::StructDecl { name, fields } => todo!(),
+        DeclKind::EnumDecl { name, variants } => todo!(),
+        DeclKind::TraitDecl { name, methods } => todo!(),
+    }
+}
+
+fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<Stmt> {
+    todo!()
+}
+
 #[cfg(test)]
-mod tests{
+mod tests {
+    use super::*;
     // TODO: ??? ;)
     use super::super::super::parser::parse_ast;
 
     #[test]
     fn test_semantic_analysis() {
         let ast = parse_ast("fn foo(x: Int): Int = x").unwrap();
-        assert!(super::semantic_analysis(&ast).is_ok());
+        semantic_analysis(&ast).unwrap();
 
         let ast = parse_ast("fn foo(x: Int): Int = y").unwrap();
-        assert!(super::semantic_analysis(&ast).is_err());
+        assert!(semantic_analysis(&ast).is_err());
 
         let ast = parse_ast("fn foo(x: Int): Int = x  fn bar(y: Int): Int = x").unwrap();
-        assert!(super::semantic_analysis(&ast).is_err());
+        assert!(semantic_analysis(&ast).is_err());
     }
 }

@@ -1,5 +1,3 @@
-
-mod types;
-mod type_analysis;
-mod semantic_analysis;
+pub mod semantic_analysis;
+pub mod types;
 mod utils;

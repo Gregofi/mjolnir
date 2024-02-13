@@ -1,4 +1,4 @@
-use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, TypedIdentifier};
+use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, TypedIdentifier, Decl, DeclKind};
 use std::str::FromStr;
 
 
@@ -49,21 +49,17 @@ match {
     r#""([^\\"]|\\[~ntr\\"])*""# => STRING_LITERAL,
 }
 
-pub TopStmt: Stmt = {
-    TopLevelStmts => Stmt { node: StmtKind::Top(<>), location: Location::new(0, 0) },
+pub TopLevelDecls: Vec<Decl> = {
+    <mut v: (<TopLevelDecl>)*> <e: TopLevelDecl> => { v.push(e); v }
 }
 
-TopLevelStmts: Vec<Stmt> = {
-    <mut v: (<TopLevelStmt>)*> <e: TopLevelStmt> => { v.push(e); v }
-}
-
-TopLevelStmt: Stmt = {
+TopLevelDecl: Decl = {
     FunDecl => <>,
 }
 
-FunDecl: Stmt = {
-    <l: @L> FN <name: Identifier> LPAREN <parameters: MaybeTypedIdentifiers> RPAREN <return_type: (COLON <Identifier>)?> ASSIGN <body: Expr> <r: @R> => Stmt {
-        node: StmtKind::FunDecl{name, parameters, return_type, body: Box::new(body)},
+FunDecl: Decl = {
+    <l: @L> FN <name: Identifier> LPAREN <parameters: MaybeTypedIdentifiers> RPAREN <return_type: (COLON <Identifier>)?> ASSIGN <body: Expr> <r: @R> => Decl {
+        node: DeclKind::FunDecl{name, parameters, return_type, body: Box::new(body)},
         location: Location::new(l, r),
     }
 }

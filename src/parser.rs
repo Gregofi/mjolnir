@@ -1,13 +1,13 @@
-use crate::ast::Stmt;
+use crate::ast::Decl;
 
 extern crate lalrpop_util;
-use lalrpop_util::ParseError;
 use lalrpop_util::lalrpop_mod;
 use lalrpop_util::lexer::Token;
+use lalrpop_util::ParseError;
 
-pub fn parse_ast(input: &str) -> Result<Stmt, ParseError<usize, Token<'_>, &'static str>> {
+pub fn parse_ast(input: &str) -> Result<Vec<Decl>, ParseError<usize, Token<'_>, &'static str>> {
     lalrpop_mod!(pub grammar);
-    grammar::TopStmtParser::new().parse(input)
+    grammar::TopLevelDeclsParser::new().parse(input)
 }
 
 #[cfg(test)]
