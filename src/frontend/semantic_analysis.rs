@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::ast::{Decl, DeclKind, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, TypedIdentifier};
 use crate::ast::{Expr, Stmt};
-use crate::frontend::types::{BuiltInType, Type};
+use crate::frontend::types::{BuiltInType, Type, FunctionType};
 use anyhow::{Context, Result};
 
 struct IdentInfo {
@@ -25,7 +25,7 @@ impl<T> Environment<T> {
 pub struct SymbolTable<T> {
     pub identifiers: Vec<Environment<T>>,
     types: HashMap<String, Rc<Type>>,
-    decls: HashMap<String, Decl>,
+    decls: HashMap<String, TypedDecl>,
 }
 
 impl<T> SymbolTable<T> {
@@ -82,7 +82,7 @@ impl<T> SymbolTable<T> {
         self.types.insert(name, value);
     }
 
-    pub fn add_decl(&mut self, name: String, decl: Decl) {
+    pub fn add_decl(&mut self, name: String, decl: TypedDecl) {
         self.decls.insert(name, decl);
     }
 }
@@ -126,7 +126,7 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
     }
 }
 
-fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<TypedDecl> {
+fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
     match &ast.node {
         DeclKind::FunDecl {
             name,
@@ -155,11 +155,20 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<TypedDec
 
             env.pop();
 
-            let return_type = return_type.as_ref().expect("Function must have explicit return type");
-            let return_type = env.get_type(&return_type).clone().with_context(|| {
-                format!("Return type '{}' not declared", return_type)
-            })?;
-            if typed_expr.ty.is_same(return_type) {
+            let return_type_str = return_type.as_ref().expect("Function must have explicit return type");
+            let return_type = env.get_type(&return_type_str).with_context(|| {
+                format!("Return type '{}' not declared", return_type_str)
+            })?.clone();
+
+            let funtype = Rc::new(Type::FunctionType(Box::new(FunctionType {
+                parameters: typed_params.iter().map(|p| p.ty.clone()).collect(),
+                return_type: return_type.clone(),
+            })));
+
+            env.insert_type(name.clone(), funtype.clone());
+            env.insert(name.clone(), IdentInfo { ty: funtype.clone() });
+
+            let decl = if typed_expr.ty.is_same(&return_type) {
                 Ok(TypedDecl {
                     node: TypedDeclKind::FunDecl {
                         name: name.clone(),
@@ -174,12 +183,14 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<TypedDec
                     "Return type '{}' does not match function return type",
                     return_type
                 ))
-            }
+            }?;
+            env.add_decl(name.clone(), decl);
         }
         DeclKind::StructDecl { name, fields } => todo!(),
         DeclKind::EnumDecl { name, variants } => todo!(),
         DeclKind::TraitDecl { name, methods } => todo!(),
     }
+    Ok(())
 }
 
 fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<Stmt> {

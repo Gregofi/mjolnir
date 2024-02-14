@@ -1,18 +1,18 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 pub struct FunctionType {
-    parameters: Vec<Type>,
-    return_type: Type,
+    pub parameters: Vec<Rc<Type>>,
+    pub return_type: Rc<Type>,
 }
 
 pub struct StructType {
-    fields: HashMap<String, Type>,
-    methods: HashMap<String, FunctionType>,
-    implemented_traits: Vec<String>,
+    pub fields: HashMap<String, Rc<Type>>,
+    pub methods: HashMap<String, FunctionType>,
+    pub implemented_traits: Vec<String>,
 }
 
 pub struct Trait {
-    methods: HashMap<String, FunctionType>,
+    pub methods: HashMap<String, FunctionType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
