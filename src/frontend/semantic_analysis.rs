@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Decl, DeclKind, ExprKind, StmtKind, TypedExpr};
+use crate::ast::{Decl, DeclKind, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, TypedIdentifier};
 use crate::ast::{Expr, Stmt};
 use crate::frontend::types::{BuiltInType, Type};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
 struct IdentInfo {
     ty: Rc<Type>,
@@ -25,6 +25,7 @@ impl<T> Environment<T> {
 pub struct SymbolTable<T> {
     pub identifiers: Vec<Environment<T>>,
     types: HashMap<String, Rc<Type>>,
+    decls: HashMap<String, Decl>,
 }
 
 impl<T> SymbolTable<T> {
@@ -46,6 +47,7 @@ impl<T> SymbolTable<T> {
         Self {
             identifiers: Vec::new(),
             types: Self::predefined_types(),
+            decls: HashMap::new(),
         }
     }
 
@@ -79,6 +81,10 @@ impl<T> SymbolTable<T> {
     pub fn insert_type(&mut self, name: String, value: Rc<Type>) {
         self.types.insert(name, value);
     }
+
+    pub fn add_decl(&mut self, name: String, decl: Decl) {
+        self.decls.insert(name, decl);
+    }
 }
 
 fn semantic_analysis(ast: &Vec<Decl>) -> Result<()> {
@@ -101,7 +107,12 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
             let id = env.get(name);
             match id {
                 Some(id) => {
-                    todo!()
+                    let ty = id.ty.clone();
+                    Ok(TypedExpr {
+                        node: ExprKind::Identifier(name.clone()),
+                        location: ast.location.clone(),
+                        ty,
+                    })
                 }
                 None => Err(anyhow::anyhow!("Identifier '{}' not declared", name))?,
             }
@@ -115,7 +126,7 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
     }
 }
 
-fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
+fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<TypedDecl> {
     match &ast.node {
         DeclKind::FunDecl {
             name,
@@ -124,6 +135,7 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
             body,
         } => {
             env.push();
+            let mut typed_params = vec![];
             for param in parameters {
                 let param_type = param
                     .ty
@@ -132,13 +144,37 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
                 let ty = env
                     .get_type(param_type)
                     .with_context(|| format!("Type '{}' not declared", param_type))?;
+                typed_params.push(TypedIdentifier {
+                    name: param.name.clone(),
+                    ty: ty.clone(),
+                });
                 env.insert(param.name.clone(), IdentInfo { ty: ty.clone() });
             }
 
-            analyse_expr(&body, env)?;
+            let typed_expr = analyse_expr(&body, env)?;
 
             env.pop();
-            Ok(())
+
+            let return_type = return_type.as_ref().expect("Function must have explicit return type");
+            let return_type = env.get_type(&return_type).clone().with_context(|| {
+                format!("Return type '{}' not declared", return_type)
+            })?;
+            if typed_expr.ty.is_same(return_type) {
+                Ok(TypedDecl {
+                    node: TypedDeclKind::FunDecl {
+                        name: name.clone(),
+                        parameters: typed_params,
+                        return_type: return_type.clone(),
+                        body: Box::new(typed_expr),
+                    },
+                    location: ast.location.clone(),
+                })
+            } else {
+                Err(anyhow::anyhow!(
+                    "Return type '{}' does not match function return type",
+                    return_type
+                ))
+            }
         }
         DeclKind::StructDecl { name, fields } => todo!(),
         DeclKind::EnumDecl { name, variants } => todo!(),

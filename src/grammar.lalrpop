@@ -1,4 +1,4 @@
-use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, TypedIdentifier, Decl, DeclKind};
+use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, WeaklyTypedIdentifier, Decl, DeclKind};
 use std::str::FromStr;
 
 
@@ -83,10 +83,10 @@ Number: Expr = {
     }
 }
 
-MaybeTypedIdentifiers: Vec<TypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
+MaybeTypedIdentifiers: Vec<WeaklyTypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
 
-MaybeTypedIdentifier: TypedIdentifier = {
-    <name: Identifier> <ty: (COLON <Identifier>)?> => TypedIdentifier {
+MaybeTypedIdentifier: WeaklyTypedIdentifier = {
+    <name: Identifier> <ty: (COLON <Identifier>)?> => WeaklyTypedIdentifier {
         name,
         ty,
     }
