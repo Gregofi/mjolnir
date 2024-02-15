@@ -19,6 +19,8 @@ pub enum ExprKind<St, Ex> {
     Int(i64),
     Identifier(String),
     Compound(Vec<St>, Box<Ex>),
+    FunCall{target: Box<Ex>, args: Vec<Ex>},
+    If{cond: Box<Ex>, then: Box<Ex>, els: Box<Ex>},
 }
 
 #[derive(Clone)]

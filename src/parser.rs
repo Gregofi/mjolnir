@@ -27,4 +27,15 @@ mod test {
         assert!(parse_ast("fn main() = 1\nfn bar() = 2").is_ok());
         assert!(parse_ast("fn main(): Int = 1\nfn baz() = 2 fn bor() = 3").is_ok());
     }
+
+    #[test]
+    fn test_funcall() {
+        assert!(parse_ast("fn main() = foo()").is_ok());
+        assert!(parse_ast("fn main() = foo(1, 2)").is_ok());
+    }
+
+    #[test]
+    fn test_if() {
+        assert!(parse_ast("fn main() = if 1 { 2 } else { 3 }").is_ok());
+    }
 }

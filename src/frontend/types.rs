@@ -5,6 +5,15 @@ pub struct FunctionType {
     pub return_type: Rc<Type>,
 }
 
+impl FunctionType {
+    pub fn check_args(&self, args: &[Rc<Type>]) -> bool {
+        if self.parameters.len() != args.len() {
+            return false;
+        }
+        self.parameters.iter().zip(args).all(|(expected, actual)| expected.is_same(actual)) 
+    }
+}
+
 pub struct StructType {
     pub fields: HashMap<String, Rc<Type>>,
     pub methods: HashMap<String, FunctionType>,
