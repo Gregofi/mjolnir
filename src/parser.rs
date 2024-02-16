@@ -37,5 +37,6 @@ mod test {
     #[test]
     fn test_if() {
         assert!(parse_ast("fn main() = if 1 { 2 } else { 3 }").is_ok());
+        assert!(parse_ast("fn main() = if 1 { if 2 { 3} else { 4 } } else { 3 }").is_ok());
     }
 }
