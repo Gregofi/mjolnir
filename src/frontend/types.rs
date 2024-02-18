@@ -71,6 +71,28 @@ impl Type {
             _ => false,
         }
     }
+
+    pub fn is_bool(&self) -> bool {
+        match self {
+            Type::BuiltIn(BuiltInType::Bool) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_int(&self) -> bool {
+        match self {
+            Type::BuiltIn(BuiltInType::Int) => true,
+            _ => false,
+        }
+    }
+
+    pub fn get_bool() -> Rc<Type> {
+        Type::BuiltIn(BuiltInType::Bool).into()
+    }
+
+    pub fn get_int() -> Rc<Type> {
+        Type::BuiltIn(BuiltInType::Int).into()
+    }
 }
 
 impl Display for Type {

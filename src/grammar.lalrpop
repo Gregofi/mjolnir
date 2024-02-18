@@ -123,10 +123,30 @@ BinOpPrec2: String = {
 
 Term: Expr = {
     Number => <>,
+    BooleanLit => <>,
     IdentifierExpr => <>,
     FunCallExpr => <>,
     IfExpr => <>,
     Paren => <>,
+}
+
+BooleanLit: Expr = {
+    TrueExpr => <>,
+    FalseExpr => <>,
+}
+
+TrueExpr: Expr = {
+    <l: @L> TRUE <r: @R> => Expr {
+        node: ExprKind::Boolean(true),
+        location: Location::new(l, r),
+    },
+}
+
+FalseExpr: Expr = {
+    <l: @L> FALSE <r: @R> => Expr {
+        node: ExprKind::Boolean(false),
+        location: Location::new(l, r),
+    },
 }
 
 Paren: Expr = {

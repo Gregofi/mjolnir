@@ -14,7 +14,7 @@ impl Location {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Operator {
     Mul,
     Div,
@@ -51,6 +51,7 @@ impl From<&str> for Operator {
 #[derive(Clone)]
 pub enum ExprKind<St, Ex> {
     Int(i64),
+    Boolean(bool),
     Identifier(String),
     Compound(Vec<St>, Box<Ex>),
     FunCall{target: Box<Ex>, args: Vec<Ex>},

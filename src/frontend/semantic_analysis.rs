@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Decl, DeclKind, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, TypedIdentifier};
+use crate::ast::{Decl, DeclKind, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, TypedIdentifier, Operator};
 use crate::ast::{Expr, Stmt};
 use crate::frontend::types::{BuiltInType, Type, FunctionType};
 use anyhow::{Context, Result};
@@ -33,14 +33,49 @@ impl<T> SymbolTable<T> {
         let mut types = HashMap::new();
         types.insert("Int".to_string(), Type::BuiltIn(BuiltInType::Int).into());
         types.insert(
-            "String".to_string(),
+            "Bool".to_string(),
             Type::BuiltIn(BuiltInType::Bool).into(),
         );
         types.insert(
-            "Bool".to_string(),
+            "String".to_string(),
             Type::BuiltIn(BuiltInType::String).into(),
         );
         types
+    }
+
+    fn get_int(&self) -> Rc<Type> {
+        self.types.get("Int").unwrap().clone()
+    }
+
+    fn get_bool(&self) -> Rc<Type> {
+        self.types.get("Bool").unwrap().clone()
+    }
+
+    fn type_binary(&self, left: &Type, right: &Type, op: &Operator) -> Result<Rc<Type>> {
+        let arith_operators = [Operator::Add, Operator::Sub, Operator::Mul, Operator::Div];
+        let logical_operators = [
+            Operator::Less,
+            Operator::Greater,
+            Operator::LessEqual,
+            Operator::GreaterEqual,
+            Operator::Equal,
+            Operator::Neq,
+        ];
+        match (left, right, op) {
+            (Type::BuiltIn(BuiltInType::Int), Type::BuiltIn(BuiltInType::Int), op)
+                if arith_operators.contains(op) => {
+                Ok(Type::get_int())
+            }
+            (Type::BuiltIn(BuiltInType::Int), Type::BuiltIn(BuiltInType::Int), op)
+                if logical_operators.contains(op) => {
+                Ok(Type::get_bool())
+            }
+            _ => Err(anyhow::anyhow!(
+                "Binary operation not supported for types: {} and {}",
+                left,
+                right
+            )),
+        }
     }
 
     pub fn new() -> Self {
@@ -158,6 +193,12 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
         },
         ExprKind::If { cond, then, els } => {
             let cond_typed = analyse_expr(cond, env)?;
+            if !cond_typed.ty.is_bool() {
+                return Err(anyhow::anyhow!(
+                    "If condition must be of type Bool, found: {}",
+                    cond_typed.ty
+                ));
+            }
             let then_typed = analyse_expr(then, env)?;
             let els_typed = analyse_expr(els, env)?;
             let ty = then_typed.ty.clone();
@@ -182,7 +223,7 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
         ExprKind::Binary { op, lhs, rhs } => {
             let lhs_typed = analyse_expr(lhs, env)?;
             let rhs_typed = analyse_expr(rhs, env)?;
-            let ty = lhs_typed.ty.clone();
+            let ty = env.type_binary(&lhs_typed.ty, &rhs_typed.ty, op)?;
             if lhs_typed.ty.is_same(&rhs_typed.ty) {
                 Ok(TypedExpr {
                     node: ExprKind::Binary {
@@ -200,6 +241,13 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
                     rhs_typed.ty
                 ))
             }
+        },
+        ExprKind::Boolean(b) => {
+            Ok(TypedExpr {
+                node: ExprKind::Boolean(*b),
+                location: ast.location.clone(),
+                ty: env.get_bool(),
+            })
         },
     }
 }
@@ -293,6 +341,19 @@ mod tests {
         assert!(semantic_analysis(&ast).is_err());
 
         let ast = parse_ast("fn foo(x: Int): Int = foo(5)").unwrap();
-        semantic_analysis(&ast).unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
+
+    }
+
+    #[test]
+    fn test_sa_ifs() {
+        let ast = parse_ast("fn foo(x: Int): Int = if true { 1 } else { 2 }").unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
+
+        let ast = parse_ast("fn foo(x: Int): Int = if 1 { 2 } else { 3 }").unwrap();
+        assert!(semantic_analysis(&ast).is_err());
+
+        let ast = parse_ast("fn foo(x: Int): Int = if true { 1 } else { true }").unwrap();
+        assert!(semantic_analysis(&ast).is_err());
     }
 }
