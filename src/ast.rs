@@ -14,6 +14,40 @@ impl Location {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum Operator {
+    Mul,
+    Div,
+    Add,
+    Sub,
+    Mod,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+    Equal,
+    Neq,
+}
+
+impl From<&str> for Operator {
+    fn from(value: &str) -> Self {
+        match value {
+            "*" => Operator::Mul,
+            "/" => Operator::Div,
+            "+" => Operator::Add,
+            "-" => Operator::Sub,
+            "%" => Operator::Mod,
+            "<" => Operator::Less,
+            ">" => Operator::Greater,
+            "<=" => Operator::LessEqual,
+            ">=" => Operator::GreaterEqual,
+            "==" => Operator::Equal,
+            "!=" => Operator::Neq,
+            _ => panic!("Invalid operator"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum ExprKind<St, Ex> {
     Int(i64),
@@ -21,6 +55,7 @@ pub enum ExprKind<St, Ex> {
     Compound(Vec<St>, Box<Ex>),
     FunCall{target: Box<Ex>, args: Vec<Ex>},
     If{cond: Box<Ex>, then: Box<Ex>, els: Box<Ex>},
+    Binary{op: Operator, lhs: Box<Ex>, rhs: Box<Ex>},
 }
 
 #[derive(Clone)]

@@ -39,4 +39,12 @@ mod test {
         assert!(parse_ast("fn main() = if 1 { 2 } else { 3 }").is_ok());
         assert!(parse_ast("fn main() = if 1 { if 2 { 3} else { 4 } } else { 3 }").is_ok());
     }
+
+    #[test]
+    fn test_binaries() {
+        assert!(parse_ast("fn main() = 1 + 2").is_ok());
+        assert!(parse_ast("fn main() = 1 + 2 + 3").is_ok());
+        assert!(parse_ast("fn main() = 1 + 2 * 3").is_ok());
+        assert!(parse_ast("fn main() = 1 * 2 + 3").is_ok());
+    }
 }

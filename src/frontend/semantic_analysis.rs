@@ -179,6 +179,28 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
                 ))
             }
         }
+        ExprKind::Binary { op, lhs, rhs } => {
+            let lhs_typed = analyse_expr(lhs, env)?;
+            let rhs_typed = analyse_expr(rhs, env)?;
+            let ty = lhs_typed.ty.clone();
+            if lhs_typed.ty.is_same(&rhs_typed.ty) {
+                Ok(TypedExpr {
+                    node: ExprKind::Binary {
+                        op: *op,
+                        lhs: Box::new(lhs_typed),
+                        rhs: Box::new(rhs_typed),
+                    },
+                    location: ast.location.clone(),
+                    ty,
+                })
+            } else {
+                Err(anyhow::anyhow!(
+                    "Binary operands have different types: {} and {}",
+                    lhs_typed.ty,
+                    rhs_typed.ty
+                ))
+            }
+        },
     }
 }
 

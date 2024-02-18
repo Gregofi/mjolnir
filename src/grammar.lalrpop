@@ -1,4 +1,4 @@
-use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, WeaklyTypedIdentifier, Decl, DeclKind};
+use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, WeaklyTypedIdentifier, Decl, DeclKind, Operator};
 use std::str::FromStr;
 
 
@@ -15,9 +15,9 @@ match {
     "=>" => FAT_RIGHT_ARROW,
     "||" => OR,
     "&&" => AND,
+    "="  => ASSIGN,
     "==" => EQ,
     "!=" => NEQ,
-    "="  => ASSIGN,
     ">"  => GREATER,
     "<"  => LESS,
     ">=" => GREATEREQ,
@@ -64,15 +64,77 @@ FunDecl: Decl = {
     }
 }
 
+MaybeTypedIdentifiers: Vec<WeaklyTypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
+
+MaybeTypedIdentifier: WeaklyTypedIdentifier = {
+    <name: Identifier> <ty: (COLON <Identifier>)?> => WeaklyTypedIdentifier {
+        name,
+        ty,
+    }
+}
+
+Identifier: String = IDENTIFIER => <>.to_string();
+
+Separated<T, S>: Vec<T> = {
+    <mut v: (<T> S)*> <e: T?> => match e {
+        None => v,
+        Some(e) => { v.push(e); v }
+    }
+}
+
+
+// ==================== Binary Expressions ====================
+
+// This rule is pretty stupid, we would want something like
+// #[precedence(1)]
+// BinOp<Prec1>,
+// #[precedence(2)]
+// BinOp<Prec2>,
+// But that caused conflicts, hence the copy paste.
 Expr: Expr = {
+    #[precedence(level="0")]
+    Term,
+    #[precedence(level="1")] #[assoc(side="left")]
+    <l: @L> <lhs: Expr> <opcode: BinOpPrec1> <rhs: Expr> <r: @R> => {
+        Expr {
+            node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
+            location: Location::new(l, r),
+        }
+    },
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l: @L> <lhs: Expr> <opcode: BinOpPrec2> <rhs: Expr> <r: @R> => {
+        Expr {
+            node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
+            location: Location::new(l, r),
+        }
+    },
+}
+
+BinOpPrec1: String = {
+    MULTIPLY => <>.to_string(),
+    DIVIDE => <>.to_string(),
+    MODULO => <>.to_string(),
+}
+
+BinOpPrec2: String = {
+    PLUS => <>.to_string(),
+    MINUS => <>.to_string(),
+}
+
+Term: Expr = {
     Number => <>,
     IdentifierExpr => <>,
     FunCallExpr => <>,
     IfExpr => <>,
-};
+    Paren => <>,
+}
+
+Paren: Expr = {
+    <l: @L> LPAREN <expr: Expr> RPAREN <r: @R> => expr,
+}
 
 FunCallExpr: Expr = {
-    <l: @L> <target: Expr> LPAREN <args: Arguments> RPAREN <r: @R> => Expr {
+    <l: @L> <target: Term> LPAREN <args: Arguments> RPAREN <r: @R> => Expr {
         node: ExprKind::FunCall{target: Box::new(target), args},
         location: Location::new(l, r),
     }
@@ -101,20 +163,3 @@ Number: Expr = {
     }
 }
 
-MaybeTypedIdentifiers: Vec<WeaklyTypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
-
-MaybeTypedIdentifier: WeaklyTypedIdentifier = {
-    <name: Identifier> <ty: (COLON <Identifier>)?> => WeaklyTypedIdentifier {
-        name,
-        ty,
-    }
-}
-
-Identifier: String = IDENTIFIER => <>.to_string();
-
-Separated<T, S>: Vec<T> = {
-    <mut v: (<T> S)*> <e: T?> => match e {
-        None => v,
-        Some(e) => { v.push(e); v }
-    }
-}
