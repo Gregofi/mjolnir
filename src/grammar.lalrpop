@@ -1,4 +1,4 @@
-use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, WeaklyTypedIdentifier, Decl, DeclKind, Operator};
+use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, WeaklyTypedIdentifier, Decl, DeclKind, Operator, VarDecl};
 use std::str::FromStr;
 
 
@@ -64,6 +64,14 @@ FunDecl: Decl = {
     }
 }
 
+VarDecl: VarDecl = {
+    LET <name: Identifier> <return_type: (COLON <Identifier>)?> ASSIGN <value: Expr> SEMICOLON => VarDecl {
+        name,
+        ty: return_type,
+        value: Box::new(value),
+    }
+}
+
 MaybeTypedIdentifiers: Vec<WeaklyTypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
 
 MaybeTypedIdentifier: WeaklyTypedIdentifier = {
@@ -82,8 +90,18 @@ Separated<T, S>: Vec<T> = {
     }
 }
 
+// ==================== Statements ====================
 
-// ==================== Binary Expressions ====================
+
+Stmt: Stmt = {
+    <l: @L> <decl: VarDecl> <r: @R> => Stmt {
+        node: StmtKind::VarDecl(decl),
+        location: Location::new(l, r),
+    },
+}
+
+
+// ==================== Expressions ====================
 
 // This rule is pretty stupid, we would want something like
 // #[precedence(1)]
@@ -146,6 +164,14 @@ Term: Expr = {
     FunCallExpr => <>,
     IfExpr => <>,
     Paren => <>,
+    Compound => <>,
+}
+
+Compound: Expr = {
+    <l: @L> LBRACE <mut stmts: (<Stmt>)*> <e: Expr> RBRACE <r: @R> => Expr {
+        node: ExprKind::Compound(stmts, Box::new(e)),
+        location: Location::new(l, r),
+    }
 }
 
 BooleanLit: Expr = {

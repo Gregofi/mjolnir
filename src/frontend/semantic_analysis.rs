@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Decl, DeclKind, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, TypedIdentifier, Operator};
+use crate::ast::{Decl, DeclKind, VarDecl, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, TypedIdentifier, Operator, TypedStmt, TypedVarDecl, TypedStmtKind};
 use crate::ast::{Expr, Stmt};
 use crate::frontend::types::{BuiltInType, Type, FunctionType};
 use anyhow::{Context, Result};
 
+// TODO: Why we save this and not whole typed Decl?
 struct IdentInfo {
     ty: Rc<Type>,
 }
@@ -252,6 +253,32 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
     }
 }
 
+fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<TypedVarDecl> {
+    let typed_value = analyse_expr(&decl.value, env)?;
+    let resulting_type = match &decl.ty {
+        Some(ty) => {
+            let type_ = env.get_type(ty).with_context(|| format!("Type '{}' not declared", ty))?;
+            if !typed_value.ty.is_same(type_) {
+                return Err(anyhow::anyhow!(
+                    "Declared type '{}' does not match value type '{}'",
+                    type_,
+                    typed_value.ty
+                ));
+            } else {
+                type_.clone()
+            }
+        },
+        None => {
+            typed_value.ty.clone()
+        }
+    };
+
+    Ok(TypedVarDecl {
+        name: decl.name.clone(),
+        value: Box::new(typed_value),
+    })
+}
+
 fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
     match &ast.node {
         DeclKind::FunDecl {
@@ -315,12 +342,30 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
         DeclKind::StructDecl { name, fields } => todo!(),
         DeclKind::EnumDecl { name, variants } => todo!(),
         DeclKind::TraitDecl { name, methods } => todo!(),
+        DeclKind::VarDecl(var_decl) => {
+            let typed_decl = type_var_decl(var_decl, env)?;
+
+            // TODO: This may not be enough with global variables.
+            // we will see when we implement interpreting.
+            env.insert(var_decl.name.clone(), IdentInfo { ty: typed_decl.value.ty.clone() });
+        }
     }
     Ok(())
 }
 
-fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<Stmt> {
-    todo!()
+fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<TypedStmt> {
+    let node = match &ast.node {
+        crate::ast::StmtKind::VarDecl(var_decl) => {
+            let typed_decl = type_var_decl(var_decl, env)?;
+            env.insert(var_decl.name.clone(), IdentInfo { ty: typed_decl.value.ty.clone() });
+            TypedStmtKind::VarDecl(typed_decl)
+        },
+    };
+
+    Ok(TypedStmt {
+        node,
+        location: ast.location.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -367,6 +412,18 @@ mod tests {
         assert!(semantic_analysis(&ast).is_ok());
 
         let ast = parse_ast("fn foo(x: Int): Int = x + 1 == 2").unwrap();
+        assert!(semantic_analysis(&ast).is_err());
+    }
+
+    #[test]
+    fn test_compound_expr() {
+        let ast = parse_ast("fn foo(x: Int): Int = { let y = 5; y }").unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
+
+        let ast = parse_ast("fn foo(x: Int): Int = { let y = 5; y + 1 }").unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
+
+        let ast = parse_ast("fn foo(x: Int): Int = { let y = true; y + 1 }").unwrap();
         assert!(semantic_analysis(&ast).is_err());
     }
 }

@@ -61,11 +61,7 @@ pub enum ExprKind<St, Ex> {
 
 #[derive(Clone)]
 pub enum StmtKind {
-    VarDecl {
-        name: String,
-        ty: Option<String>,
-        value: Option<Expr>,
-    },
+    VarDecl(VarDecl),
 }
 
 #[derive(Clone)]
@@ -89,6 +85,18 @@ pub struct TypedIdentifier {
 // Untyped
 
 #[derive(Clone)]
+pub struct VarDecl {
+    pub name: String,
+    pub ty: Option<String>,
+    pub value: Box<Expr>,
+}
+
+pub struct TypedVarDecl {
+    pub name: String,
+    pub value: Box<TypedExpr>,
+}
+
+#[derive(Clone)]
 pub enum DeclKind {
     FunDecl {
         name: String,
@@ -96,6 +104,7 @@ pub enum DeclKind {
         return_type: Option<String>,
         body: Box<Expr>,
     },
+    VarDecl(VarDecl),
     StructDecl {
         name: String,
         fields: Vec<WeaklyTypedIdentifier>,
@@ -123,6 +132,7 @@ pub enum TypedDeclKind {
         return_type: Rc<Type>,
         body: Box<TypedExpr>,
     },
+    VarDecl(TypedVarDecl),
 }
 
 #[derive(Clone)]
@@ -138,7 +148,16 @@ pub struct Stmt {
 }
 
 pub struct TypedExpr {
-    pub node: ExprKind<Stmt, TypedExpr>,
+    pub node: ExprKind<TypedStmt, TypedExpr>,
     pub location: Location,
     pub ty: Rc<Type>,
+}
+
+pub struct TypedStmt {
+    pub node: TypedStmtKind,
+    pub location: Location,
+}
+
+pub enum TypedStmtKind {
+    VarDecl(TypedVarDecl),
 }
