@@ -356,4 +356,17 @@ mod tests {
         let ast = parse_ast("fn foo(x: Int): Int = if true { 1 } else { true }").unwrap();
         assert!(semantic_analysis(&ast).is_err());
     }
+
+
+    #[test]
+    fn test_binary_expr() {
+        let ast = parse_ast("fn foo(x: Int): Int = x + 1").unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
+
+        let ast = parse_ast("fn foo(x: Int): Bool = x + 1 == 2").unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
+
+        let ast = parse_ast("fn foo(x: Int): Int = x + 1 == 2").unwrap();
+        assert!(semantic_analysis(&ast).is_err());
+    }
 }
