@@ -1,9 +1,8 @@
 use clap::{Arg, Command};
-use parser::parse_ast;
+use frontend::parser::parse_ast;
 
 mod ast;
 mod frontend;
-mod parser;
 
 fn main() {
     let matches = Command::new("My Super Program")

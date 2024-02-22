@@ -327,7 +327,7 @@ fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<Stmt> {
 mod tests {
     use super::*;
     // TODO: ??? ;)
-    use super::super::super::parser::parse_ast;
+    use crate::frontend::parser::parse_ast;
 
     #[test]
     fn test_semantic_analysis() {
