@@ -46,5 +46,6 @@ mod test {
         assert!(parse_ast("fn main() = 1 + 2 + 3").is_ok());
         assert!(parse_ast("fn main() = 1 + 2 * 3").is_ok());
         assert!(parse_ast("fn main() = 1 * 2 + 3").is_ok());
+        assert!(parse_ast("fn main() = (1 * 2 + 3 == 4) <= 5").is_ok());
     }
 }

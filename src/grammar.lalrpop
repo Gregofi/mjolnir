@@ -91,6 +91,8 @@ Separated<T, S>: Vec<T> = {
 // #[precedence(2)]
 // BinOp<Prec2>,
 // But that caused conflicts, hence the copy paste.
+// Also, the binary operators are converted from string. We would ideally want
+// something more "type safe".
 Expr: Expr = {
     #[precedence(level="0")]
     Term,
@@ -108,6 +110,13 @@ Expr: Expr = {
             location: Location::new(l, r),
         }
     },
+    #[precedence(level="3")] #[assoc(side="left")]
+    <l: @L> <lhs: Expr> <opcode: BinOpPrec3> <rhs: Expr> <r: @R> => {
+        Expr {
+            node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
+            location: Location::new(l, r),
+        }
+    },
 }
 
 BinOpPrec1: String = {
@@ -119,6 +128,15 @@ BinOpPrec1: String = {
 BinOpPrec2: String = {
     PLUS => <>.to_string(),
     MINUS => <>.to_string(),
+}
+
+BinOpPrec3: String = {
+    EQ => <>.to_string(),
+    NEQ => <>.to_string(),
+    GREATER => <>.to_string(),
+    LESS => <>.to_string(),
+    GREATEREQ => <>.to_string(),
+    LESSEQ => <>.to_string(),
 }
 
 Term: Expr = {
