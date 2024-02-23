@@ -123,13 +123,14 @@ impl<T> SymbolTable<T> {
     }
 }
 
-fn semantic_analysis(ast: &Vec<Decl>) -> Result<()> {
+pub fn semantic_analysis(ast: &Vec<Decl>) -> Result<HashMap<String, TypedDecl>> {
     let mut symbols = SymbolTable::<IdentInfo>::new();
     symbols.push();
     for decl in ast {
         analyse_decl(decl, &mut symbols)?;
     }
-    Ok(())
+
+    Ok(symbols.decls)
 }
 
 fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExpr> {

@@ -91,6 +91,7 @@ pub struct VarDecl {
     pub value: Box<Expr>,
 }
 
+#[derive(Clone)]
 pub struct TypedVarDecl {
     pub name: String,
     pub value: Box<TypedExpr>,
@@ -125,6 +126,7 @@ pub struct TypedDecl {
     pub location: Location,
 }
 
+#[derive(Clone)]
 pub enum TypedDeclKind {
     FunDecl {
         name: String,
@@ -147,17 +149,20 @@ pub struct Stmt {
     pub location: Location,
 }
 
+#[derive(Clone)]
 pub struct TypedExpr {
     pub node: ExprKind<TypedStmt, TypedExpr>,
     pub location: Location,
     pub ty: Rc<Type>,
 }
 
+#[derive(Clone)]
 pub struct TypedStmt {
     pub node: TypedStmtKind,
     pub location: Location,
 }
 
+#[derive(Clone)]
 pub enum TypedStmtKind {
     VarDecl(TypedVarDecl),
 }

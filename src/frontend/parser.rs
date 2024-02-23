@@ -4,10 +4,13 @@ extern crate lalrpop_util;
 use lalrpop_util::lalrpop_mod;
 use lalrpop_util::lexer::Token;
 use lalrpop_util::ParseError;
+use anyhow::{Result, anyhow};
 
-pub fn parse_ast(input: &str) -> Result<Vec<Decl>, ParseError<usize, Token<'_>, &'static str>> {
+pub fn parse_ast(input: &str) -> Result<Vec<Decl>> {
     lalrpop_mod!(pub grammar);
-    grammar::TopLevelDeclsParser::new().parse(input)
+    // TODO: This is a quick hack to avoid lifetimes,
+    // we should parse the error from parse here and show proper error message.
+    grammar::TopLevelDeclsParser::new().parse(input).map_err(|_| anyhow!("Parse error"))
 }
 
 #[cfg(test)]

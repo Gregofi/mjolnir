@@ -3,6 +3,7 @@ use frontend::parser::parse_ast;
 
 mod ast;
 mod frontend;
+mod backend;
 
 fn main() {
     let matches = Command::new("My Super Program")
