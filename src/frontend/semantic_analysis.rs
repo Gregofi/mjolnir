@@ -387,7 +387,6 @@ mod tests {
 
         let ast = parse_ast("fn foo(x: Int): Int = foo(5)").unwrap();
         assert!(semantic_analysis(&ast).is_ok());
-
     }
 
     #[test]
@@ -425,5 +424,12 @@ mod tests {
 
         let ast = parse_ast("fn foo(x: Int): Int = { let y = true; y + 1 }").unwrap();
         assert!(semantic_analysis(&ast).is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn test_functions() {
+        let ast = parse_ast("fn bar(x: Int): Int = foo(x)  fn foo(x: Int): Int = x").unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
     }
 }
