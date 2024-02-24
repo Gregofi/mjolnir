@@ -1,7 +1,5 @@
-use std::rc::Rc;
 use crate::frontend::types::Type;
-
-
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct WeaklyTypedIdentifier {

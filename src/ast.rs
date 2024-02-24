@@ -55,9 +55,20 @@ pub enum ExprKind<St, Ex> {
     Boolean(bool),
     Identifier(String),
     Compound(Vec<St>, Box<Ex>),
-    FunCall{target: Box<Ex>, args: Vec<Ex>},
-    If{cond: Box<Ex>, then: Box<Ex>, els: Box<Ex>},
-    Binary{op: Operator, lhs: Box<Ex>, rhs: Box<Ex>},
+    FunCall {
+        target: Box<Ex>,
+        args: Vec<Ex>,
+    },
+    If {
+        cond: Box<Ex>,
+        then: Box<Ex>,
+        els: Box<Ex>,
+    },
+    Binary {
+        op: Operator,
+        lhs: Box<Ex>,
+        rhs: Box<Ex>,
+    },
 }
 
 #[derive(Clone)]

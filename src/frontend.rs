@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use crate::ast::TypedDecl;
+use anyhow::Result;
 
+pub mod parser;
 pub mod semantic_analysis;
 pub mod types;
-pub mod parser;
 pub mod utils;
 
 pub fn parse_ast<'a>(program: &str) -> Result<HashMap<String, TypedDecl>> {

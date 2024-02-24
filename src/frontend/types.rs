@@ -1,5 +1,5 @@
-use std::{collections::HashMap, fmt::Display, rc::Rc};
 use crate::frontend::utils::TypedIdentifier;
+use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 pub struct FunctionType {
     pub parameters: Vec<TypedIdentifier>,
@@ -11,7 +11,10 @@ impl FunctionType {
         if self.parameters.len() != args.len() {
             return false;
         }
-        self.parameters.iter().zip(args).all(|(expected, actual)| expected.ty.is_same(actual)) 
+        self.parameters
+            .iter()
+            .zip(args)
+            .all(|(expected, actual)| expected.ty.is_same(actual))
     }
 }
 

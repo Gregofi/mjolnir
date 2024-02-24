@@ -1,7 +1,9 @@
+use anyhow::{anyhow, Context, Result};
 use std::{collections::HashMap, rc::Rc};
-use anyhow::{Result, Context, anyhow};
 
-use crate::ast::{TypedDecl, TypedDeclKind, TypedExpr, ExprKind, TypedStmtKind, TypedStmt, Operator};
+use crate::ast::{
+    ExprKind, Operator, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt, TypedStmtKind,
+};
 
 const MAIN_FUNCTION_NAME: &str = "main";
 
@@ -12,7 +14,7 @@ enum Value {
     String(Rc<String>),
     Bool(bool),
     Unit,
-    Function{body: TypedExpr},
+    Function { body: TypedExpr },
 }
 
 struct CallEnvironment {
@@ -21,7 +23,10 @@ struct CallEnvironment {
 
 impl CallEnvironment {
     pub fn add_identifier(&mut self, name: String, value: Value) {
-        self.env.last_mut().expect("No environment, use push first!").insert(name, value);
+        self.env
+            .last_mut()
+            .expect("No environment, use push first!")
+            .insert(name, value);
     }
 
     pub fn get_identifier(&self, name: &String) -> Option<&Value> {
@@ -48,7 +53,9 @@ impl CallStack {
 
     /// Pushes a new call environment to the stack with one layer.
     pub fn push_call(&mut self) {
-        self.stack.push(CallEnvironment { env: vec![HashMap::new()] });
+        self.stack.push(CallEnvironment {
+            env: vec![HashMap::new()],
+        });
     }
 
     pub fn pop_call(&mut self) {
@@ -56,15 +63,23 @@ impl CallStack {
     }
 
     pub fn add_identifier(&mut self, name: String, value: Value) {
-        self.stack.last_mut().expect("No environment, use push first!").add_identifier(name, value);
+        self.stack
+            .last_mut()
+            .expect("No environment, use push first!")
+            .add_identifier(name, value);
     }
 
     pub fn get_identifier(&self, name: &String) -> Option<&Value> {
-        self.stack.last().expect("No environment, use push first!").get_identifier(name)
+        self.stack
+            .last()
+            .expect("No environment, use push first!")
+            .get_identifier(name)
     }
 
     pub fn get_env(&mut self) -> &mut CallEnvironment {
-        self.stack.last_mut().expect("No environment, use push first!")
+        self.stack
+            .last_mut()
+            .expect("No environment, use push first!")
     }
 }
 
@@ -78,9 +93,9 @@ impl Interpreter {
         let mut globals = HashMap::new();
         for (name, decl) in top_decls.iter() {
             let value_decl = match &decl.node {
-                TypedDeclKind::FunDecl { body, .. } => {
-                    Some(Value::Function{body: *body.clone()})
-                },
+                TypedDeclKind::FunDecl { body, .. } => Some(Value::Function {
+                    body: *body.clone(),
+                }),
                 _ => None,
             };
 
@@ -88,7 +103,10 @@ impl Interpreter {
                 globals.insert(name.clone(), value);
             }
         }
-        Interpreter { call_stack: CallStack::new(), globals }
+        Interpreter {
+            call_stack: CallStack::new(),
+            globals,
+        }
     }
 
     pub fn interpret_expr(&mut self, expr: &TypedExpr) -> Result<Value> {
@@ -102,20 +120,26 @@ impl Interpreter {
                 }
                 match value {
                     None => Err(anyhow!("Identifier not found: {}", id)),
-                    Some(value) => Ok(value.clone())
+                    Some(value) => Ok(value.clone()),
                 }
             }
             ExprKind::Compound(stmts, expr) => {
                 todo!()
-            },
+            }
             ExprKind::FunCall { target, args } => {
                 // Evaluate arguments with current environment
-                let args_values = args.iter().map(|arg| self.interpret_expr(arg)).collect::<Result<Vec<Value>>>()?;
+                let args_values = args
+                    .iter()
+                    .map(|arg| self.interpret_expr(arg))
+                    .collect::<Result<Vec<Value>>>()?;
 
                 self.call_stack.push_call();
-                let fun_type = expr.ty.as_function().expect("Function call must have function type, should be caught by semantic analysis");
+                let fun_type = expr.ty.as_function().expect(
+                    "Function call must have function type; Should be caught by semantic analysis",
+                );
                 for (param, arg) in fun_type.parameters.iter().zip(args_values.iter()) {
-                    self.call_stack.add_identifier(param.name.clone(), arg.clone());
+                    self.call_stack
+                        .add_identifier(param.name.clone(), arg.clone());
                 }
 
                 let resulting_function = self.interpret_expr(target)?;
@@ -125,9 +149,9 @@ impl Interpreter {
                         self.call_stack.pop_call();
                         Ok(result)
                     },
-                    _ => Err(anyhow!("Target of function call must be a function, should be caught by semantic analysis")),
+                    _ => Err(anyhow!("Target of function call must be a function; Should be caught by semantic analysis")),
                 }
-            },
+            }
             ExprKind::If { cond, then, els } => {
                 let cond_val = self.interpret_expr(cond)?;
                 match cond_val {
@@ -135,7 +159,7 @@ impl Interpreter {
                     Value::Bool(false) => self.interpret_expr(els),
                     _ => Err(anyhow!("If condition must be boolean")),
                 }
-            },
+            }
             ExprKind::Binary { op, lhs, rhs } => {
                 let lhs_val = self.interpret_expr(lhs)?;
                 let rhs_val = self.interpret_expr(rhs)?;
@@ -157,9 +181,11 @@ impl Interpreter {
                         };
                         Ok(res)
                     }
-                    _ => panic!("Invalid types for binary operator, should be catched by semantic analysis"),
+                    _ => panic!(
+                        "Invalid types for binary operator, should be catched by semantic analysis"
+                    ),
                 }
-            },
+            }
         }
     }
 
@@ -167,11 +193,14 @@ impl Interpreter {
      * Receives top level declarations and interprets them.
      */
     pub fn interpret(&mut self) -> Result<u8> {
-        let main = self.globals.get(MAIN_FUNCTION_NAME).context("No main function found")?;
+        let main = self
+            .globals
+            .get(MAIN_FUNCTION_NAME)
+            .context("No main function found")?;
         let main_body = match main {
             Value::Function { body } => {
                 body.clone() // FIXME: borrow checker is not happy
-            },
+            }
             _ => return Err(anyhow!("Main function must be a function")),
         };
 
@@ -179,7 +208,9 @@ impl Interpreter {
         let val = self.interpret_expr(&main_body)?;
         match val {
             Value::Integer(x) if x > 0 && x < 256 => Ok(x.try_into().unwrap()),
-            Value::Integer(_) => Err(anyhow!("Main function must return unit or integer between 0 and 255")),
+            Value::Integer(_) => Err(anyhow!(
+                "Main function must return unit or integer between 0 and 255"
+            )),
             Value::Unit => Ok(0),
             _ => Err(anyhow!("Main function must return integer or unit")),
         }
@@ -215,11 +246,13 @@ mod tests {
 
     #[test]
     fn test_fun_call() {
-        let ast = parse_ast("
+        let ast = parse_ast(
+            "
 fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }
 
 fn main(): Int = fact(5)
-");
+",
+        );
         let mut interpreter = Interpreter::new(ast.unwrap());
         assert_eq!(interpreter.interpret().unwrap(), 120);
     }

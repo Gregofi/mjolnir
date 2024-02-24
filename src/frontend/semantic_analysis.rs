@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Decl, DeclKind, VarDecl, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, Operator, TypedStmt, TypedVarDecl, TypedStmtKind};
+use crate::ast::{
+    Decl, DeclKind, ExprKind, Operator, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt,
+    TypedStmtKind, TypedVarDecl, VarDecl,
+};
 use crate::ast::{Expr, Stmt};
+use crate::frontend::types::{BuiltInType, FunctionType, Type};
 use crate::frontend::utils::TypedIdentifier;
-use crate::frontend::types::{BuiltInType, Type, FunctionType};
 use anyhow::{Context, Result};
 
 // TODO: Why we save this and not whole typed Decl?
@@ -34,10 +37,7 @@ impl<T> SymbolTable<T> {
     fn predefined_types() -> HashMap<String, Rc<Type>> {
         let mut types = HashMap::new();
         types.insert("Int".to_string(), Type::BuiltIn(BuiltInType::Int).into());
-        types.insert(
-            "Bool".to_string(),
-            Type::BuiltIn(BuiltInType::Bool).into(),
-        );
+        types.insert("Bool".to_string(), Type::BuiltIn(BuiltInType::Bool).into());
         types.insert(
             "String".to_string(),
             Type::BuiltIn(BuiltInType::String).into(),
@@ -65,11 +65,13 @@ impl<T> SymbolTable<T> {
         ];
         match (left, right, op) {
             (Type::BuiltIn(BuiltInType::Int), Type::BuiltIn(BuiltInType::Int), op)
-                if arith_operators.contains(op) => {
+                if arith_operators.contains(op) =>
+            {
                 Ok(Type::get_int())
             }
             (Type::BuiltIn(BuiltInType::Int), Type::BuiltIn(BuiltInType::Int), op)
-                if logical_operators.contains(op) => {
+                if logical_operators.contains(op) =>
+            {
                 Ok(Type::get_bool())
             }
             _ => Err(anyhow::anyhow!(
@@ -127,6 +129,11 @@ impl<T> SymbolTable<T> {
 pub fn semantic_analysis(ast: &Vec<Decl>) -> Result<HashMap<String, TypedDecl>> {
     let mut symbols = SymbolTable::<IdentInfo>::new();
     symbols.push();
+
+    for decl in ast {
+        prepare_decl(&decl, &mut symbols)?;
+    }
+
     for decl in ast {
         analyse_decl(decl, &mut symbols)?;
     }
@@ -170,7 +177,10 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
 
             let fun_ret_type = match typed_target.ty.as_ref() {
                 Type::FunctionType(ty) => {
-                    let args_types = typed_args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
+                    let args_types = typed_args
+                        .iter()
+                        .map(|arg| arg.ty.clone())
+                        .collect::<Vec<_>>();
                     if ty.check_args(&*args_types) {
                         Ok(ty.return_type.clone())
                     } else {
@@ -178,7 +188,7 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
                             "Function call arguments do not match function signature"
                         ));
                     }
-                },
+                }
                 _ => Err(anyhow::anyhow!(
                     "Target of function call is not a function: {}",
                     typed_target.ty
@@ -193,7 +203,7 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
                 location: ast.location.clone(),
                 ty: fun_ret_type,
             })
-        },
+        }
         ExprKind::If { cond, then, els } => {
             let cond_typed = analyse_expr(cond, env)?;
             if !cond_typed.ty.is_bool() {
@@ -244,14 +254,12 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
                     rhs_typed.ty
                 ))
             }
-        },
-        ExprKind::Boolean(b) => {
-            Ok(TypedExpr {
-                node: ExprKind::Boolean(*b),
-                location: ast.location.clone(),
-                ty: env.get_bool(),
-            })
-        },
+        }
+        ExprKind::Boolean(b) => Ok(TypedExpr {
+            node: ExprKind::Boolean(*b),
+            location: ast.location.clone(),
+            ty: env.get_bool(),
+        }),
     }
 }
 
@@ -259,7 +267,9 @@ fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<Typ
     let typed_value = analyse_expr(&decl.value, env)?;
     let resulting_type = match &decl.ty {
         Some(ty) => {
-            let type_ = env.get_type(ty).with_context(|| format!("Type '{}' not declared", ty))?;
+            let type_ = env
+                .get_type(ty)
+                .with_context(|| format!("Type '{}' not declared", ty))?;
             if !typed_value.ty.is_same(type_) {
                 return Err(anyhow::anyhow!(
                     "Declared type '{}' does not match value type '{}'",
@@ -269,10 +279,8 @@ fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<Typ
             } else {
                 type_.clone()
             }
-        },
-        None => {
-            typed_value.ty.clone()
         }
+        None => typed_value.ty.clone(),
     };
 
     Ok(TypedVarDecl {
@@ -281,15 +289,16 @@ fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<Typ
     })
 }
 
-fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
+/// Prepare global declarations (which must be explicitely typed) as types and
+/// identifiers. This prevents forward references and allows recursive functions.
+fn prepare_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
     match &ast.node {
         DeclKind::FunDecl {
             name,
             parameters,
             return_type,
-            body,
+            ..
         } => {
-            env.push();
             let mut typed_params = vec![];
             for param in parameters {
                 let param_type = param
@@ -303,32 +312,55 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
                     name: param.name.clone(),
                     ty: ty.clone(),
                 });
-                env.insert(param.name.clone(), IdentInfo { ty: ty.clone() });
             }
 
-            let return_type_str = return_type.as_ref().expect("Function must have explicit return type");
-            let return_type = env.get_type(&return_type_str).with_context(|| {
-                format!("Return type '{}' not declared", return_type_str)
-
-            })?.clone();
+            let return_type_str = return_type
+                .as_ref()
+                .expect("Function must have explicit return type");
+            let return_type = env
+                .get_type(&return_type_str)
+                .with_context(|| format!("Return type '{}' not declared", return_type_str))?;
             let funtype = Rc::new(Type::FunctionType(Box::new(FunctionType {
-                parameters: typed_params.clone(),
+                parameters: typed_params,
                 return_type: return_type.clone(),
             })));
+            env.insert(name.clone(), IdentInfo { ty: funtype });
+        }
+        _ => todo!(),
+    };
+    Ok(())
+}
 
-            env.insert_type(name.clone(), funtype.clone());
-            env.insert(name.clone(), IdentInfo { ty: funtype.clone() });
+fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
+    match &ast.node {
+        DeclKind::FunDecl { name, body, .. } => {
+            let typed = env
+                .get(name)
+                .expect("Function must be prepared by prepare_decl; Compiler bug")
+                .ty
+                .clone();
+            let typed = typed.as_function().context("Not a function")?;
+
+            env.push();
+            for param in &typed.parameters {
+                env.insert(
+                    param.name.clone(),
+                    IdentInfo {
+                        ty: param.ty.clone(),
+                    },
+                );
+            }
 
             let typed_expr = analyse_expr(&body, env)?;
 
             env.pop();
 
-            let decl = if typed_expr.ty.is_same(&return_type) {
+            let decl = if typed_expr.ty.is_same(&typed.return_type) {
                 Ok(TypedDecl {
                     node: TypedDeclKind::FunDecl {
                         name: name.clone(),
-                        parameters: typed_params,
-                        return_type: return_type.clone(),
+                        parameters: typed.parameters.clone(),
+                        return_type: typed.return_type.clone(),
                         body: Box::new(typed_expr),
                     },
                     location: ast.location.clone(),
@@ -336,7 +368,7 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
             } else {
                 Err(anyhow::anyhow!(
                     "Return type '{}' does not match function return type",
-                    return_type
+                    typed.return_type
                 ))
             }?;
             env.add_decl(name.clone(), decl);
@@ -349,7 +381,12 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
 
             // TODO: This may not be enough with global variables.
             // we will see when we implement interpreting.
-            env.insert(var_decl.name.clone(), IdentInfo { ty: typed_decl.value.ty.clone() });
+            env.insert(
+                var_decl.name.clone(),
+                IdentInfo {
+                    ty: typed_decl.value.ty.clone(),
+                },
+            );
         }
     }
     Ok(())
@@ -359,9 +396,14 @@ fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<TypedStm
     let node = match &ast.node {
         crate::ast::StmtKind::VarDecl(var_decl) => {
             let typed_decl = type_var_decl(var_decl, env)?;
-            env.insert(var_decl.name.clone(), IdentInfo { ty: typed_decl.value.ty.clone() });
+            env.insert(
+                var_decl.name.clone(),
+                IdentInfo {
+                    ty: typed_decl.value.ty.clone(),
+                },
+            );
             TypedStmtKind::VarDecl(typed_decl)
-        },
+        }
     };
 
     Ok(TypedStmt {
@@ -400,7 +442,6 @@ mod tests {
         assert!(semantic_analysis(&ast).is_err());
     }
 
-
     #[test]
     fn test_binary_expr() {
         let ast = parse_ast("fn foo(x: Int): Int = x + 1").unwrap();
@@ -426,13 +467,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_functions() {
         let ast = parse_ast("fn bar(x: Int): Int = foo(x)  fn foo(x: Int): Int = x").unwrap();
         assert!(semantic_analysis(&ast).is_ok());
 
         // recursive fun
-        let ast = parse_ast("fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }").unwrap();
+        let ast =
+            parse_ast("fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }").unwrap();
         assert!(semantic_analysis(&ast).is_ok());
     }
 }
