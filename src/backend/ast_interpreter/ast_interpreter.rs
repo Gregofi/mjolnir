@@ -15,49 +15,67 @@ enum Value {
     Function,
 }
 
-struct Env {
-    identifiers: HashMap<String, Value>,
+struct CallEnvironment {
+    env: Vec<HashMap<String, Value>>,
 }
 
-impl Env {
+impl CallEnvironment {
     pub fn add_identifier(&mut self, name: String, value: Value) {
-        self.identifiers.insert(name, value);
+        self.env.last_mut().expect("No environment, use push first!").insert(name, value);
     }
 
     pub fn get_identifier(&self, name: &String) -> Option<&Value> {
-        self.identifiers.get(name)
+        self.env.iter().rev().find_map(|env| env.get(name))
+    }
+
+    pub fn push(&mut self) {
+        self.env.push(HashMap::new());
+    }
+
+    pub fn pop(&mut self) {
+        self.env.pop();
+    }
+}
+
+struct CallStack {
+    stack: Vec<CallEnvironment>,
+}
+
+impl CallStack {
+    pub fn new() -> CallStack {
+        CallStack { stack: vec![] }
+    }
+
+    /// Pushes a new call environment to the stack with one layer.
+    pub fn push_call(&mut self) {
+        self.stack.push(CallEnvironment { env: vec![HashMap::new()] });
+    }
+
+    pub fn pop_call(&mut self) {
+        self.stack.pop();
+    }
+
+    pub fn add_identifier(&mut self, name: String, value: Value) {
+        self.stack.last_mut().expect("No environment, use push first!").add_identifier(name, value);
+    }
+
+    pub fn get_identifier(&self, name: &String) -> Option<&Value> {
+        self.stack.last().expect("No environment, use push first!").get_identifier(name)
+    }
+
+    pub fn get_env(&mut self) -> &mut CallEnvironment {
+        self.stack.last_mut().expect("No environment, use push first!")
     }
 }
 
 struct Interpreter {
-    env: Vec<Env>,
+    call_stack: CallStack,
     top_decls: HashMap<String, TypedDecl>,
 }
 
 impl Interpreter {
     pub fn new(top_decls: HashMap<String, TypedDecl>) -> Interpreter {
-        Interpreter { env: vec![], top_decls }
-    }
-
-    pub fn push_env(&mut self) {
-        self.env.push(Env { identifiers: HashMap::new() });
-    }
-
-    pub fn pop_env(&mut self) {
-        self.env.pop();
-    }
-
-    pub fn add_identifier(&mut self, name: String, value: Value) {
-        self.env.last_mut().expect("No environment, use push_env first!").add_identifier(name, value);
-    }
-
-    pub fn get_identifier(&self, name: &String) -> Option<&Value> {
-        for env in self.env.iter().rev() {
-            if let Some(value) = env.get_identifier(name) {
-                return Some(value);
-            }
-        }
-        None
+        Interpreter { call_stack: CallStack::new(), top_decls }
     }
 
     pub fn interpret_expr(&mut self, expr: &TypedExpr) -> Result<Value> {
@@ -65,7 +83,7 @@ impl Interpreter {
             ExprKind::Int(int) => Ok(Value::Integer(*int)),
             ExprKind::Boolean(bool) => Ok(Value::Bool(*bool)),
             ExprKind::Identifier(id) => {
-                let value = self.get_identifier(id).with_context(|| format!("Identifier {} not found", id))?.clone();
+                let value = self.call_stack.get_identifier(id).with_context(|| format!("Identifier {} not found", id))?.clone();
                 Ok(value)
             }
             ExprKind::Compound(stmts, expr) => todo!(),
@@ -111,7 +129,6 @@ impl Interpreter {
      * Receives top level declarations and interprets them.
      */
     pub fn interpret(&mut self) -> Result<u8> {
-        self.push_env();
         let main = self.top_decls.get(MAIN_FUNCTION_NAME).context("No main function found")?;
         let main_body = match &main.node {
             TypedDeclKind::FunDecl{name, body, ..} => {
@@ -123,6 +140,7 @@ impl Interpreter {
             },
         };
 
+        self.call_stack.push_call();
         let val = self.interpret_expr(&main_body)?;
         match val {
             Value::Integer(x) if x > 0 && x < 256 => Ok(x.try_into().unwrap()),
