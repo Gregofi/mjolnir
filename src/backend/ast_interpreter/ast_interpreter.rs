@@ -134,7 +134,7 @@ impl Interpreter {
                     .collect::<Result<Vec<Value>>>()?;
 
                 self.call_stack.push_call();
-                let fun_type = expr.ty.as_function().expect(
+                let fun_type = target.ty.as_function().expect(
                     "Function call must have function type; Should be caught by semantic analysis",
                 );
                 for (param, arg) in fun_type.parameters.iter().zip(args_values.iter()) {
