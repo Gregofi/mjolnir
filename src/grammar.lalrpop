@@ -1,4 +1,5 @@
-use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, WeaklyTypedIdentifier, Decl, DeclKind, Operator, VarDecl};
+use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl};
+use crate::frontend::utils::WeaklyTypedIdentifier;
 use std::str::FromStr;
 
 

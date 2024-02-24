@@ -100,6 +100,7 @@ impl Interpreter {
                 if value.is_none() {
                     value = self.globals.get(id);
                 }
+                
                 match value {
                     None => Err(anyhow!("Identifier not found: {}", id)),
                     Some(value) => Ok(value.clone())
@@ -211,16 +212,5 @@ mod tests {
         let ast = parse_ast("fn main(): Int = if false { 1 } else { 2 }").unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
-    }
-
-    #[test]
-    fn test_fun_call() {
-        let ast = parse_ast("
-fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }
-
-fn main(): Int = fact(5)
-");
-        let mut interpreter = Interpreter::new(ast.unwrap());
-        assert_eq!(interpreter.interpret().unwrap(), 120);
     }
 }

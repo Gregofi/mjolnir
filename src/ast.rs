@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use crate::frontend::types::Type;
+use crate::frontend::utils::{TypedIdentifier, WeaklyTypedIdentifier};
 
 #[derive(Clone)]
 pub struct Location {
@@ -68,18 +69,6 @@ pub enum StmtKind {
 pub struct Decl {
     pub node: DeclKind,
     pub location: Location,
-}
-
-#[derive(Clone)]
-pub struct WeaklyTypedIdentifier {
-    pub name: String,
-    pub ty: Option<String>,
-}
-
-#[derive(Clone)]
-pub struct TypedIdentifier {
-    pub name: String,
-    pub ty: Rc<Type>,
 }
 
 // Untyped

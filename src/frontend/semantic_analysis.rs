@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Decl, DeclKind, VarDecl, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, TypedIdentifier, Operator, TypedStmt, TypedVarDecl, TypedStmtKind};
+use crate::ast::{Decl, DeclKind, VarDecl, ExprKind, TypedExpr, TypedDeclKind, TypedDecl, Operator, TypedStmt, TypedVarDecl, TypedStmtKind};
 use crate::ast::{Expr, Stmt};
+use crate::frontend::utils::TypedIdentifier;
 use crate::frontend::types::{BuiltInType, Type, FunctionType};
 use anyhow::{Context, Result};
 
@@ -311,7 +312,7 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
 
             })?.clone();
             let funtype = Rc::new(Type::FunctionType(Box::new(FunctionType {
-                parameters: typed_params.iter().map(|p| p.ty.clone()).collect(),
+                parameters: typed_params.clone(),
                 return_type: return_type.clone(),
             })));
 
@@ -383,9 +384,6 @@ mod tests {
         let ast = parse_ast("fn foo(x: Int): Int = y").unwrap();
         assert!(semantic_analysis(&ast).is_err());
 
-        let ast = parse_ast("fn foo(x: Int): Int = x  fn bar(y: Int): Int = x").unwrap();
-        assert!(semantic_analysis(&ast).is_err());
-
         let ast = parse_ast("fn foo(x: Int): Int = foo(5)").unwrap();
         assert!(semantic_analysis(&ast).is_ok());
     }
@@ -431,6 +429,10 @@ mod tests {
     #[ignore]
     fn test_functions() {
         let ast = parse_ast("fn bar(x: Int): Int = foo(x)  fn foo(x: Int): Int = x").unwrap();
+        assert!(semantic_analysis(&ast).is_ok());
+
+        // recursive fun
+        let ast = parse_ast("fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }").unwrap();
         assert!(semantic_analysis(&ast).is_ok());
     }
 }

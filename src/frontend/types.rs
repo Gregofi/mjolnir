@@ -1,7 +1,8 @@
 use std::{collections::HashMap, fmt::Display, rc::Rc};
+use crate::frontend::utils::TypedIdentifier;
 
 pub struct FunctionType {
-    pub parameters: Vec<Rc<Type>>,
+    pub parameters: Vec<TypedIdentifier>,
     pub return_type: Rc<Type>,
 }
 
@@ -10,7 +11,7 @@ impl FunctionType {
         if self.parameters.len() != args.len() {
             return false;
         }
-        self.parameters.iter().zip(args).all(|(expected, actual)| expected.is_same(actual)) 
+        self.parameters.iter().zip(args).all(|(expected, actual)| expected.ty.is_same(actual)) 
     }
 }
 
@@ -92,6 +93,13 @@ impl Type {
 
     pub fn get_int() -> Rc<Type> {
         Type::BuiltIn(BuiltInType::Int).into()
+    }
+
+    pub fn as_function(&self) -> Option<&FunctionType> {
+        match self {
+            Type::FunctionType(f) => Some(f),
+            _ => None,
+        }
     }
 }
 
