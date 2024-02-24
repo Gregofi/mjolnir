@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fun_call() {
+    fn test_fact() {
         let ast = parse_ast(
             "
 fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }
@@ -255,5 +255,18 @@ fn main(): Int = fact(5)
         );
         let mut interpreter = Interpreter::new(ast.unwrap());
         assert_eq!(interpreter.interpret().unwrap(), 120);
+    }
+
+    #[test]
+    fn test_fib() {
+        let ast = parse_ast(
+            "
+fn fib(n: Int): Int = if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+
+fn main(): Int = fib(7)
+"
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 13);
     }
 }
