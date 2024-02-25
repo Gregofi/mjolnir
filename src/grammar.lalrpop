@@ -66,7 +66,7 @@ FunDecl: Decl = {
 }
 
 VarDecl: VarDecl = {
-    LET <name: Identifier> <return_type: (COLON <Identifier>)?> ASSIGN <value: Expr> SEMICOLON => VarDecl {
+    LET <name: Identifier> <return_type: (COLON <Identifier>)?> ASSIGN <value: Expr> => VarDecl {
         name,
         ty: return_type,
         value: Box::new(value),
@@ -99,6 +99,10 @@ Stmt: Stmt = {
         node: StmtKind::VarDecl(decl),
         location: Location::new(l, r),
     },
+    <l: @L> <expr: Expr> <r: @R> => Stmt {
+        node: StmtKind::Expr(expr),
+        location: Location::new(l, r),
+    }
 }
 
 
@@ -169,9 +173,21 @@ Term: Expr = {
 }
 
 Compound: Expr = {
-    <l: @L> LBRACE <mut stmts: (<Stmt>)*> <e: Expr> RBRACE <r: @R> => Expr {
-        node: ExprKind::Compound(stmts, Box::new(e)),
-        location: Location::new(l, r),
+    <l: @L> LBRACE <mut stmts: (<Stmt> SEMICOLON)*> <e: Expr?> RBRACE <r: @R> => {
+        let final_expr = match e {
+            Some(e) => Box::new(e),
+            None => Box::new(Expr {
+                location: Location::new(l, r), // Not totaly accurate
+                node: ExprKind::Unit,
+            })
+        };
+        Expr {
+            node: ExprKind::Compound (
+                stmts,
+                final_expr,
+            ),
+            location: Location::new(l, r),
+        }
     }
 }
 

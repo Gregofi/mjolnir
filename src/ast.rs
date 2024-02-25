@@ -51,6 +51,7 @@ impl From<&str> for Operator {
 
 #[derive(Clone)]
 pub enum ExprKind<St, Ex> {
+    Unit,
     Int(i64),
     Boolean(bool),
     Identifier(String),
@@ -74,6 +75,7 @@ pub enum ExprKind<St, Ex> {
 #[derive(Clone)]
 pub enum StmtKind {
     VarDecl(VarDecl),
+    Expr(Expr),
 }
 
 #[derive(Clone)]
@@ -165,4 +167,5 @@ pub struct TypedStmt {
 #[derive(Clone)]
 pub enum TypedStmtKind {
     VarDecl(TypedVarDecl),
+    Expr(TypedExpr),
 }

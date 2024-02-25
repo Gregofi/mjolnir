@@ -130,6 +130,7 @@ impl Interpreter {
 
     pub fn interpret_expr(&mut self, expr: &TypedExpr) -> Result<Value> {
         match &expr.node {
+            ExprKind::Unit => Ok(Value::Unit),
             ExprKind::Int(int) => Ok(Value::Integer(*int)),
             ExprKind::Boolean(bool) => Ok(Value::Bool(*bool)),
             ExprKind::Identifier(id) => {
@@ -143,7 +144,10 @@ impl Interpreter {
                 }
             }
             ExprKind::Compound(stmts, expr) => {
-                todo!()
+                for stmt in stmts {
+                    self.interpret_stmt(stmt)?;
+                }
+                self.interpret_expr(expr)
             }
             ExprKind::FunCall { target, args } => {
                 // Evaluate arguments with current environment
@@ -211,6 +215,18 @@ impl Interpreter {
                 }
             }
         }
+    }
+
+    pub fn interpret_stmt(&mut self, stmt: &TypedStmt) -> Result<()> {
+        match &stmt.node {
+            TypedStmtKind::VarDecl(decl) => {
+                todo!()
+            }
+            TypedStmtKind::Expr(expr)  => {
+                self.interpret_expr(expr)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn initialize_native_functions(&mut self) {
@@ -313,5 +329,29 @@ fn main(): Int = ipow(2, 3)
         );
         let mut interpreter = Interpreter::new(ast.unwrap());
         assert_eq!(interpreter.interpret().unwrap(), 8);
+    }
+
+    #[test]
+    fn test_compound_statements() {
+        let ast = parse_ast(
+            "
+fn main(): Int = {
+    1;
+    2
+}
+            ");
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 2);
+
+        let ast = parse_ast(
+            "
+fn main(): Int = {
+    iprintln(2);
+    1 + 2 + 3;
+    4
+}
+");
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 4);
     }
 }

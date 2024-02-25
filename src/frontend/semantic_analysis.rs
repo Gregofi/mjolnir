@@ -3,9 +3,8 @@ use std::rc::Rc;
 
 use crate::ast::{
     Decl, DeclKind, ExprKind, Operator, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt,
-    TypedStmtKind, TypedVarDecl, VarDecl,
+    TypedStmtKind, TypedVarDecl, VarDecl, Expr, Stmt, StmtKind
 };
-use crate::ast::{Expr, Stmt};
 use crate::frontend::types::{BuiltInType, FunctionType, Type};
 use crate::frontend::utils::TypedIdentifier;
 use anyhow::{Context, Result};
@@ -157,6 +156,11 @@ pub fn semantic_analysis(ast: &Vec<Decl>) -> Result<HashMap<String, TypedDecl>> 
 
 fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExpr> {
     match &ast.node {
+        ExprKind::Unit => Ok(TypedExpr {
+            node: ExprKind::Unit,
+            location: ast.location.clone(),
+            ty: Type::get_unit(),
+        }),
         ExprKind::Int(v) => Ok(TypedExpr {
             node: ExprKind::Int(*v),
             location: ast.location.clone(),
@@ -409,7 +413,7 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
 
 fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<TypedStmt> {
     let node = match &ast.node {
-        crate::ast::StmtKind::VarDecl(var_decl) => {
+        StmtKind::VarDecl(var_decl) => {
             let typed_decl = type_var_decl(var_decl, env)?;
             env.insert(
                 var_decl.name.clone(),
@@ -418,6 +422,10 @@ fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<TypedStm
                 },
             );
             TypedStmtKind::VarDecl(typed_decl)
+        }
+        StmtKind::Expr(expr) => {
+            let typed_expr = analyse_expr(expr, env)?;
+            TypedStmtKind::Expr(typed_expr)
         }
     };
 

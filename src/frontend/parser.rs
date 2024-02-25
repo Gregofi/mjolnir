@@ -53,4 +53,18 @@ mod test {
         assert!(parse_ast("fn main() = 1 * 2 + 3").is_ok());
         assert!(parse_ast("fn main() = (1 * 2 + 3 == 4) <= 5").is_ok());
     }
+
+    #[test]
+    fn test_compound() {
+        assert!(parse_ast("fn main() = { 1; 2; 3 }").is_ok());
+        assert!(parse_ast("fn main() = { 1; 2; }").is_ok());
+        assert!(parse_ast("fn main() = { }").is_ok());
+        assert!(parse_ast("fn main() = { 1; }").is_ok());
+        assert!(parse_ast("fn main() = { 1 }").is_ok());
+    }
+
+    #[test]
+    fn test_var_decls() {
+        assert!(parse_ast("fn main() = { let a: Int = 1; a }").is_ok());
+    }
 }
