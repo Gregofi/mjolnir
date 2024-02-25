@@ -1,0 +1,36 @@
+enum List[T] {
+    Cons(T, List),
+    Nil,
+}
+
+impl List[T] {
+    fn new(): List[T] = Nil
+
+    fn prepend(self, n: T): List[T] = Cons(n, self)
+
+    fn empty(self): Bool = match self {
+        Cons(h, t) => false,
+        Nil => true,
+    }
+
+    fn find(self, n: T): Bool = match self {
+        Cons(head, tail) if head == tail => true,
+        Cons(head, tail) => tail.find(n),
+        Nil => false,
+    }
+
+    fn append(self, n: Int): List[T] = match self {
+        Cons(H, T) => Cons(H, T.append(n)),
+        Nil => Cons(n, List::Nil),
+    }
+}
+
+fn main(): Int = {
+    let lst = List::new().append(0).append(1).append(2).append(3);
+    let exists = lst.find(2);
+    if exists {
+        0
+    } else {
+        1
+    }
+}
