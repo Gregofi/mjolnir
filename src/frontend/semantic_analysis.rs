@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast::{
-    Decl, DeclKind, ExprKind, Operator, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt,
-    TypedStmtKind, TypedVarDecl, VarDecl, Expr, Stmt, StmtKind
+    Decl, DeclKind, Expr, ExprKind, Operator, Stmt, StmtKind, TypedDecl, TypedDeclKind, TypedExpr,
+    TypedStmt, TypedStmtKind, TypedVarDecl, VarDecl,
 };
 use crate::frontend::types::{BuiltInType, FunctionType, Type};
 use crate::frontend::utils::TypedIdentifier;
@@ -35,8 +35,9 @@ pub struct SymbolTable<T> {
 impl<T> SymbolTable<T> {
     fn predefined_types() -> HashMap<String, Rc<Type>> {
         let mut types = HashMap::new();
-        types.insert("Int".to_string(), Type::BuiltIn(BuiltInType::Int).into());
-        types.insert("Bool".to_string(), Type::BuiltIn(BuiltInType::Bool).into());
+        types.insert("Int".to_string(), Type::get_int());
+        types.insert("Bool".to_string(), Type::get_bool());
+        types.insert("Unit".to_string(), Type::get_unit());
         types.insert(
             "String".to_string(),
             Type::BuiltIn(BuiltInType::String).into(),
@@ -181,10 +182,16 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
             }
         }
         ExprKind::Compound(stmts, expr) => {
-            for stmt in stmts {
-                analyse_stmt(stmt, env)?;
-            }
-            analyse_expr(expr, env)
+            let typed_stmts = stmts
+                .iter()
+                .map(|stmt| analyse_stmt(stmt, env))
+                .collect::<Result<Vec<_>>>()?;
+            let final_expr = analyse_expr(expr, env)?;
+            Ok(TypedExpr {
+                node: ExprKind::Compound(typed_stmts, Box::new(final_expr.clone())),
+                location: ast.location.clone(),
+                ty: final_expr.ty,
+            })
         }
         ExprKind::FunCall { target, args } => {
             let typed_target = analyse_expr(target, env)?;

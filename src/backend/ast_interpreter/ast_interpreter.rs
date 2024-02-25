@@ -102,7 +102,7 @@ impl CallStack {
     }
 }
 
-struct Interpreter {
+pub struct Interpreter {
     call_stack: CallStack,
     globals: HashMap<String, Value>,
 }
@@ -205,7 +205,6 @@ impl Interpreter {
                             Operator::Greater => Value::Bool(lhs > rhs),
                             Operator::LessEqual => Value::Bool(lhs <= rhs),
                             Operator::GreaterEqual => Value::Bool(lhs >= rhs),
-                            _ => todo!(),
                         };
                         Ok(res)
                     }
@@ -220,9 +219,10 @@ impl Interpreter {
     pub fn interpret_stmt(&mut self, stmt: &TypedStmt) -> Result<()> {
         match &stmt.node {
             TypedStmtKind::VarDecl(decl) => {
-                todo!()
+                let rhs = self.interpret_expr(&decl.value)?;
+                self.call_stack.add_identifier(decl.name.clone(), rhs);
             }
-            TypedStmtKind::Expr(expr)  => {
+            TypedStmtKind::Expr(expr) => {
                 self.interpret_expr(expr)?;
             }
         }
@@ -339,7 +339,8 @@ fn main(): Int = {
     1;
     2
 }
-            ");
+            ",
+        );
         let mut interpreter = Interpreter::new(ast.unwrap());
         assert_eq!(interpreter.interpret().unwrap(), 2);
 
@@ -350,8 +351,24 @@ fn main(): Int = {
     1 + 2 + 3;
     4
 }
-");
+",
+        );
         let mut interpreter = Interpreter::new(ast.unwrap());
         assert_eq!(interpreter.interpret().unwrap(), 4);
+    }
+
+    #[test]
+    fn test_compound_decls() {
+        let ast = parse_ast(
+            "
+fn main(): Int = {
+    let a: Int = 1;
+    let b: Int = 2;
+    a + b
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 }

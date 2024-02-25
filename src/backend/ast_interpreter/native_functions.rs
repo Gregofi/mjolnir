@@ -22,17 +22,16 @@ impl NativeFunction {
     }
 }
 
-pub fn _native_iprintln(args: Vec<Value>) -> Result<Value> {
-    let joined = args
-        .iter()
-        .map(|p| p.to_string())
-        .collect::<Vec<String>>()
-        .join(" ");
-    println!("{}", joined);
+fn _native_iprintln(args: Vec<Value>) -> Result<Value> {
+    if let [Value::Integer(i)] = args.as_slice() {
+        println!("{}", i);
+    } else {
+        return Err(anyhow::anyhow!("Expected integer"));
+    }
     Ok(Value::Unit)
 }
 
-pub fn native_iprintln() -> NativeFunction {
+fn native_iprintln() -> NativeFunction {
     NativeFunction::new(
         "iprintln".to_string(),
         _native_iprintln,
@@ -46,7 +45,7 @@ pub fn native_iprintln() -> NativeFunction {
     )
 }
 
-pub fn _native_ipow(args: Vec<Value>) -> Result<Value> {
+fn _native_ipow(args: Vec<Value>) -> Result<Value> {
     if args.len() != 2 {
         return Err(anyhow::anyhow!("Expected 2 arguments, got {}", args.len()));
     }
@@ -67,7 +66,7 @@ pub fn _native_ipow(args: Vec<Value>) -> Result<Value> {
     Ok(Value::Integer(a as i64))
 }
 
-pub fn native_ipow() -> NativeFunction {
+fn native_ipow() -> NativeFunction {
     NativeFunction::new(
         "ipow".to_string(),
         _native_ipow,

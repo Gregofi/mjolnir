@@ -22,6 +22,7 @@ mod test {
     #[test]
     fn test_simple_function() {
         assert!(parse_ast("fn main() = 1").is_ok());
+        assert!(parse_ast("fn main() = 1\n").is_ok());
         assert!(parse_ast("fn main(): Int = 1").is_ok());
         assert!(parse_ast("fn foo(a: Int): Int = 1").is_ok());
         assert!(parse_ast("fn foo(a: Int, b: Result): Int = 1").is_ok());
@@ -56,11 +57,12 @@ mod test {
 
     #[test]
     fn test_compound() {
-        assert!(parse_ast("fn main() = { 1; 2; 3 }").is_ok());
-        assert!(parse_ast("fn main() = { 1; 2; }").is_ok());
-        assert!(parse_ast("fn main() = { }").is_ok());
-        assert!(parse_ast("fn main() = { 1; }").is_ok());
-        assert!(parse_ast("fn main() = { 1 }").is_ok());
+        assert!(parse_ast("fn main(): Int = { 1; 2; 3 }").is_ok());
+        assert!(parse_ast("fn main(): Int = { 1; 2; }").is_ok());
+        assert!(parse_ast("fn main(): Int = { }").is_ok());
+        assert!(parse_ast("fn main(): Int = { 1; }").is_ok());
+        assert!(parse_ast("fn main(): Int = { 1 }").is_ok());
+        assert!(parse_ast("fn main(): Int = { foo(); }").is_ok());
     }
 
     #[test]
