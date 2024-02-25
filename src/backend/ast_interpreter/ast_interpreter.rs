@@ -1,20 +1,39 @@
 use anyhow::{anyhow, Context, Result};
+use std::fmt::{self, Display, Formatter};
 use std::{collections::HashMap, rc::Rc};
 
 use crate::ast::{
     ExprKind, Operator, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt, TypedStmtKind,
 };
 
+use super::native_functions;
+use super::native_functions::NativeFunction;
+
 const MAIN_FUNCTION_NAME: &str = "main";
 
 #[derive(Clone)]
-enum Value {
+pub enum Value {
     Integer(i64),
     Float(f64),
     String(Rc<String>),
     Bool(bool),
     Unit,
     Function { body: TypedExpr },
+    NativeFunction(native_functions::NativeFunction),
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Integer(i) => write!(f, "{}", i),
+            Value::Float(float) => write!(f, "{}", float),
+            Value::String(s) => write!(f, "{}", s),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Unit => write!(f, "()"),
+            Value::Function { .. } => write!(f, "Function"),
+            Value::NativeFunction(_) => write!(f, "NativeFunction"),
+        }
+    }
 }
 
 struct CallEnvironment {
@@ -149,6 +168,11 @@ impl Interpreter {
                         self.call_stack.pop_call();
                         Ok(result)
                     },
+                    Value::NativeFunction(NativeFunction{body, ..}) => {
+                        let result = body(args_values)?;
+                        self.call_stack.pop_call();
+                        Ok(result)
+                    },
                     _ => Err(anyhow!("Target of function call must be a function; Should be caught by semantic analysis")),
                 }
             }
@@ -189,10 +213,20 @@ impl Interpreter {
         }
     }
 
+    pub fn initialize_native_functions(&mut self) {
+        for native_function in native_functions::get_native_functions() {
+            self.globals.insert(
+                native_function.name.clone(),
+                Value::NativeFunction(native_function),
+            );
+        }
+    }
+
     /**
      * Receives top level declarations and interprets them.
      */
     pub fn interpret(&mut self) -> Result<u8> {
+        self.initialize_native_functions();
         let main = self
             .globals
             .get(MAIN_FUNCTION_NAME)
@@ -264,9 +298,20 @@ fn main(): Int = fact(5)
 fn fib(n: Int): Int = if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
 
 fn main(): Int = fib(7)
-"
+",
         );
         let mut interpreter = Interpreter::new(ast.unwrap());
         assert_eq!(interpreter.interpret().unwrap(), 13);
+    }
+
+    #[test]
+    fn test_native_functions() {
+        let ast = parse_ast(
+            "
+fn main(): Int = ipow(2, 3)
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 8);
     }
 }

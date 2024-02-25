@@ -126,9 +126,23 @@ impl<T> SymbolTable<T> {
     }
 }
 
+fn prepare_native_functions(env: &mut SymbolTable<IdentInfo>) {
+    let natives = crate::backend::ast_interpreter::native_functions::get_native_functions();
+    for native in natives {
+        env.insert(
+            native.name.clone(),
+            IdentInfo {
+                ty: native.ty.wrap(),
+            },
+        );
+    }
+}
+
 pub fn semantic_analysis(ast: &Vec<Decl>) -> Result<HashMap<String, TypedDecl>> {
     let mut symbols = SymbolTable::<IdentInfo>::new();
     symbols.push();
+
+    prepare_native_functions(&mut symbols);
 
     for decl in ast {
         prepare_decl(&decl, &mut symbols)?;
@@ -291,6 +305,7 @@ fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<Typ
 
 /// Prepare global declarations (which must be explicitely typed) as types and
 /// identifiers. This prevents forward references and allows recursive functions.
+/// This does not perform analysis on the declarations body.
 fn prepare_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
     match &ast.node {
         DeclKind::FunDecl {

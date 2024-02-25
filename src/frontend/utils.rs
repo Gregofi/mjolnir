@@ -7,7 +7,7 @@ pub struct WeaklyTypedIdentifier {
     pub ty: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TypedIdentifier {
     pub name: String,
     pub ty: Rc<Type>,

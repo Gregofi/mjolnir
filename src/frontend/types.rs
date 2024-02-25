@@ -1,6 +1,7 @@
 use crate::frontend::utils::TypedIdentifier;
 use std::{collections::HashMap, fmt::Display, rc::Rc};
 
+#[derive(Debug, Clone)]
 pub struct FunctionType {
     pub parameters: Vec<TypedIdentifier>,
     pub return_type: Rc<Type>,
@@ -15,6 +16,10 @@ impl FunctionType {
             .iter()
             .zip(args)
             .all(|(expected, actual)| expected.ty.is_same(actual))
+    }
+
+    pub fn wrap(&self) -> Rc<Type> {
+        Type::FunctionType(Box::new(self.clone())).into()
     }
 }
 
@@ -33,6 +38,7 @@ pub enum BuiltInType {
     Int,
     String,
     Bool,
+    Unit,
 }
 
 impl Display for BuiltInType {
@@ -41,11 +47,13 @@ impl Display for BuiltInType {
             BuiltInType::Int => "Int",
             BuiltInType::String => "String",
             BuiltInType::Bool => "Bool",
+            BuiltInType::Unit => "Unit",
         };
         f.write_str(as_str)
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum Type {
     BuiltIn(BuiltInType),
     Struct {
@@ -96,6 +104,10 @@ impl Type {
 
     pub fn get_int() -> Rc<Type> {
         Type::BuiltIn(BuiltInType::Int).into()
+    }
+
+    pub fn get_unit() -> Rc<Type> {
+        Type::BuiltIn(BuiltInType::Unit).into()
     }
 
     pub fn as_function(&self) -> Option<&FunctionType> {

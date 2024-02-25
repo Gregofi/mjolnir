@@ -12,3 +12,4 @@ lalrpop = "0.20.0"
 anyhow = "1.0.79"
 clap = { version = "4.5.0", features = ["derive"] }
 lalrpop-util = { version = "0.20.0", features = ["lexer", "unicode"] }
+lazy_static = "1.4.0"
