@@ -56,10 +56,12 @@ impl Display for BuiltInType {
 #[derive(Debug, Clone)]
 pub enum Type {
     BuiltIn(BuiltInType),
+    #[allow(dead_code)]
     Struct {
         fields: HashMap<String, Type>,
         methods: HashMap<String, FunctionType>,
     },
+    #[allow(dead_code)]
     Enum(Vec<(String, Type)>),
     FunctionType(Box<FunctionType>),
 }
@@ -91,6 +93,7 @@ impl Type {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_int(&self) -> bool {
         match self {
             Type::BuiltIn(BuiltInType::Int) => true,

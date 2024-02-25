@@ -3,8 +3,6 @@ use crate::ast::Decl;
 extern crate lalrpop_util;
 use anyhow::{anyhow, Result};
 use lalrpop_util::lalrpop_mod;
-use lalrpop_util::lexer::Token;
-use lalrpop_util::ParseError;
 
 pub fn parse_ast(input: &str) -> Result<Vec<Decl>> {
     lalrpop_mod!(pub grammar);

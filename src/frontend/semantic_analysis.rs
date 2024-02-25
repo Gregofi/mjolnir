@@ -45,14 +45,6 @@ impl<T> SymbolTable<T> {
         types
     }
 
-    fn get_int(&self) -> Rc<Type> {
-        self.types.get("Int").unwrap().clone()
-    }
-
-    fn get_bool(&self) -> Rc<Type> {
-        self.types.get("Bool").unwrap().clone()
-    }
-
     fn type_binary(&self, left: &Type, right: &Type, op: &Operator) -> Result<Rc<Type>> {
         let arith_operators = [Operator::Add, Operator::Sub, Operator::Mul, Operator::Div];
         let logical_operators = [
@@ -283,30 +275,30 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
         ExprKind::Boolean(b) => Ok(TypedExpr {
             node: ExprKind::Boolean(*b),
             location: ast.location.clone(),
-            ty: env.get_bool(),
+            ty: Type::get_bool(),
         }),
     }
 }
 
 fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<TypedVarDecl> {
     let typed_value = analyse_expr(&decl.value, env)?;
-    let resulting_type = match &decl.ty {
+    match &decl.ty {
         Some(ty) => {
             let type_ = env
                 .get_type(ty)
                 .with_context(|| format!("Type '{}' not declared", ty))?;
             if !typed_value.ty.is_same(type_) {
-                return Err(anyhow::anyhow!(
+                Err(anyhow::anyhow!(
                     "Declared type '{}' does not match value type '{}'",
                     type_,
                     typed_value.ty
-                ));
+                ))
             } else {
-                type_.clone()
+                Ok(())
             }
         }
-        None => typed_value.ty.clone(),
-    };
+        None => Ok(()),
+    }?;
 
     Ok(TypedVarDecl {
         name: decl.name.clone(),

@@ -107,16 +107,20 @@ pub enum DeclKind {
         return_type: Option<String>,
         body: Box<Expr>,
     },
+    #[allow(dead_code)]
     VarDecl(VarDecl),
+    #[allow(dead_code)]
     StructDecl {
         name: String,
         fields: Vec<WeaklyTypedIdentifier>,
     },
     // We allow writing variants similar to structs.
+    #[allow(dead_code)]
     EnumDecl {
         name: String,
         variants: Vec<WeaklyTypedIdentifier>,
     },
+    #[allow(dead_code)]
     TraitDecl {
         name: String,
         methods: Vec<WeaklyTypedIdentifier>,
@@ -136,6 +140,7 @@ pub enum TypedDeclKind {
         return_type: Rc<Type>,
         body: Box<TypedExpr>,
     },
+    #[allow(dead_code)]
     VarDecl(TypedVarDecl),
 }
 

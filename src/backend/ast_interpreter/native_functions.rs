@@ -3,7 +3,6 @@ use crate::frontend;
 use anyhow::Result;
 use frontend::types::{FunctionType, Type};
 use frontend::utils::TypedIdentifier;
-use lazy_static::lazy_static;
 
 #[derive(Clone)]
 pub struct NativeFunction {
@@ -15,10 +14,6 @@ pub struct NativeFunction {
 impl NativeFunction {
     pub fn new(name: String, body: fn(Vec<Value>) -> Result<Value>, ty: FunctionType) -> Self {
         Self { name, body, ty }
-    }
-
-    pub fn call(&self, args: Vec<Value>) -> Result<Value> {
-        (self.body)(args)
     }
 }
 
