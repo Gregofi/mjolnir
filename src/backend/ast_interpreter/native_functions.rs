@@ -1,5 +1,6 @@
 use super::ast_interpreter::Value;
 use crate::frontend;
+use crate::frontend::types::Parameter;
 use anyhow::Result;
 use frontend::types::{FunctionType, Type};
 use frontend::utils::TypedIdentifier;
@@ -31,11 +32,11 @@ fn native_iprintln() -> NativeFunction {
         "iprintln".to_string(),
         _native_iprintln,
         FunctionType {
-            parameters: vec![TypedIdentifier {
+            parameters: vec![Parameter {
                 name: "_".to_string(),
-                ty: Type::get_int(),
+                ty: Type::get_int().to_string(),
             }],
-            return_type: Type::get_unit(),
+            return_type: Type::get_unit().to_string(),
         },
     )
 }
@@ -67,16 +68,16 @@ fn native_ipow() -> NativeFunction {
         _native_ipow,
         FunctionType {
             parameters: vec![
-                TypedIdentifier {
+                Parameter {
                     name: "base".to_string(),
-                    ty: Type::get_int(),
+                    ty: Type::get_int().to_string(),
                 },
-                TypedIdentifier {
+                Parameter {
                     name: "exp".to_string(),
-                    ty: Type::get_int(),
+                    ty: Type::get_int().to_string(),
                 },
             ],
-            return_type: Type::get_int(),
+            return_type: Type::get_int().to_string(),
         },
     )
 }

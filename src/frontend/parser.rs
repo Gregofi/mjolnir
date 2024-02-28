@@ -67,4 +67,122 @@ mod test {
     fn test_var_decls() {
         assert!(parse_ast("fn main() = { let a: Int = 1; a }").is_ok());
     }
+
+    #[test]
+    fn test_enums() {
+        //        assert!(parse_ast(
+        //            "
+        //enum Foo {
+        //    A{}, B{}, C{}
+        //}
+        //"
+        //        )
+        //        .is_ok());
+        //        assert!(parse_ast(
+        //            "
+        //enum Foo {
+        //    A{}
+        //}
+        //"
+        //        )
+        //        .is_ok());
+        //        assert!(parse_ast(
+        //            "
+        //enum Foo {
+        //    A{a: Int},
+        //}
+        //"
+        //        )
+        //        .is_ok());
+        //        assert!(parse_ast(
+        //            "
+        //enum List {
+        //    Cons{head: Int, tail: List},
+        //    Nil{}
+        //}
+        //"
+        //        )
+        //        .is_ok());
+
+        assert!(parse_ast(
+            "
+enum List {
+    Cons(Int, List),
+    Nil,
+}
+"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_structs() {
+        assert!(parse_ast(
+            "
+struct Foo {
+    a: Int,
+    b: Int,
+}
+"
+        )
+        .is_ok());
+
+        assert!(parse_ast(
+            "
+struct Foo {
+    a: Int,
+    b: Int,
+}
+
+fn foo(): Foo = &Foo{a: 1, b: 2}
+"
+        )
+        .is_ok());
+
+        assert!(parse_ast(
+            "
+struct Foo {
+    a: Int,
+    b: Int,
+}
+
+fn foo(): Foo = &Foo{a: &Bar{a: Null, b: 4}, b: 2}
+"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_match() {
+        assert!(parse_ast(
+            "
+fn main() = match 1 {
+    1 => 2,
+    2 => 3,
+    _ => 4,
+}
+"
+        )
+        .is_ok());
+
+        assert!(parse_ast(
+            "
+fn main() = match a {
+    Foo{name, age} => 2,
+    Bar{name, age} => 3,
+}
+"
+        )
+        .is_ok());
+
+        assert!(parse_ast(
+            "
+fn main() = match a {
+    Cons(head, tail) => 2,
+    Nil() => 3,
+}
+"
+        )
+        .is_ok());
+    }
 }

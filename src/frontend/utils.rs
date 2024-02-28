@@ -8,6 +8,12 @@ pub struct WeaklyTypedIdentifier {
 }
 
 #[derive(Clone, Debug)]
+pub struct StronglyTypedIdentifier {
+    pub name: String,
+    pub ty: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct TypedIdentifier {
     pub name: String,
     pub ty: Rc<Type>,

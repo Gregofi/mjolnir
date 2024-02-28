@@ -1,5 +1,5 @@
-use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl};
-use crate::frontend::utils::WeaklyTypedIdentifier;
+use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern};
+use crate::frontend::utils::{WeaklyTypedIdentifier, StronglyTypedIdentifier};
 use std::str::FromStr;
 
 
@@ -12,6 +12,8 @@ match {
     // keywords
     ";" => SEMICOLON,
     ":" => COLON,
+    "_" => UNDERSCORE,
+    "&" => AMPER,
     "->" => RIGHT_ARROW,
     "=>" => FAT_RIGHT_ARROW,
     "||" => OR,
@@ -44,6 +46,11 @@ match {
     "." => DOT,
     "return" => RETURN,
     "elif" => ELIF,
+    "struct" => STRUCT,
+    "enum" => ENUM,
+    "match" => MATCH,
+    "\"" => DOUBLE_QUOTE,
+    "'" => SINGLE_QUOTE,
 
     r"[_A-Za-z][_A-Za-z0-9]*" => IDENTIFIER,
     r"[0-9]+" => NUMBER,
@@ -56,6 +63,8 @@ pub TopLevelDecls: Vec<Decl> = {
 
 TopLevelDecl: Decl = {
     FunDecl => <>,
+    StructDecl => <>,
+    EnumDecl => <>,
 }
 
 FunDecl: Decl = {
@@ -73,10 +82,52 @@ VarDecl: VarDecl = {
     }
 }
 
+StructDecl: Decl = {
+    <l: @L> STRUCT <name: Identifier> LBRACE <fields: TypedIdentifiers> RBRACE <r: @R> => Decl {
+        node: DeclKind::StructDecl {
+            name,
+            fields,
+        },
+        location: Location::new(l, r),
+    }
+}
+
+EnumVariant: EnumVariant = {
+    <name: Identifier> LPAREN <fields: Identifiers> RPAREN => EnumVariant {
+        name,
+        fields: fields.into_iter().enumerate().map(|(i, ty)| StronglyTypedIdentifier{name: i.to_string(), ty}).collect(),
+    },
+    <name: Identifier> => EnumVariant {
+        name,
+        fields: vec![],
+    },
+}
+
+EnumVariants: Vec<EnumVariant> = Separated<EnumVariant, COMMA>;
+
+EnumDecl: Decl = {
+    <l: @L> ENUM <name: Identifier> LBRACE <variants: EnumVariants> RBRACE <r: @R> => Decl {
+        node: DeclKind::EnumDecl {
+            name,
+            variants,
+        },
+        location: Location::new(l, r),
+    }
+}
+
 MaybeTypedIdentifiers: Vec<WeaklyTypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
 
 MaybeTypedIdentifier: WeaklyTypedIdentifier = {
     <name: Identifier> <ty: (COLON <Identifier>)?> => WeaklyTypedIdentifier {
+        name,
+        ty,
+    }
+}
+
+TypedIdentifiers: Vec<StronglyTypedIdentifier> = Separated<TypedIdentifier, COMMA>;
+
+TypedIdentifier: StronglyTypedIdentifier = {
+    <name: Identifier> COLON <ty: Identifier> => StronglyTypedIdentifier {
         name,
         ty,
     }
@@ -167,9 +218,12 @@ Term: Expr = {
     BooleanLit => <>,
     IdentifierExpr => <>,
     FunCallExpr => <>,
+    MemberAccessExpr => <>,
     IfExpr => <>,
     Paren => <>,
     Compound => <>,
+    Match => <>,
+    StructInitializer => <>,
 }
 
 Compound: Expr = {
@@ -189,6 +243,51 @@ Compound: Expr = {
             location: Location::new(l, r),
         }
     }
+}
+
+Match: Expr = {
+    // TODO: We would probably like Expr here instead of Term
+    <l: @L> MATCH <target: Term> LBRACE <arms: MatchArms> RBRACE <r: @R> => Expr {
+        node: ExprKind::Match {
+            target: Box::new(target),
+            arms,
+        },
+        location: Location::new(l, r),
+    }
+}
+
+MatchArms: Vec<MatchArm<Expr>> = Separated<MatchArm, COMMA>;
+
+MatchArm: MatchArm<Expr> = {
+    <pattern: Pattern> <cond: (IF <Expr>)?> FAT_RIGHT_ARROW <body: Expr> => MatchArm {
+        pattern,
+        cond: match cond {
+            Some(c) => Some(Box::new(c)),
+            None => None,
+        },
+        body: Box::new(body),
+    }
+}
+
+IdentifierList: Vec<String> = Separated<Identifier, COMMA>;
+
+Patterns: Vec<Pattern> = Separated<Pattern, COMMA>;
+
+Pattern: Pattern = {
+    UNDERSCORE => Pattern::Wildcard,
+    NUMBER => Pattern::Int(i64::from_str(<>).unwrap()),
+    TRUE => Pattern::Boolean(true),
+    FALSE => Pattern::Boolean(false),
+    DOUBLE_QUOTE <id: Identifier> DOUBLE_QUOTE => Pattern::String(id),
+    <name: Identifier> LBRACE <fields: IdentifierList> RBRACE => Pattern::Struct {
+        name,
+        fields,
+    },
+    <name: Identifier> LPAREN <patterns: Patterns> RPAREN => Pattern::Enum {
+        name,
+        patterns,
+    },
+    <name: Identifier> => Pattern::Identifier(name),
 }
 
 BooleanLit: Expr = {
@@ -212,6 +311,16 @@ FalseExpr: Expr = {
 
 Paren: Expr = {
     <l: @L> LPAREN <expr: Expr> RPAREN <r: @R> => expr,
+}
+
+MemberAccessExpr: Expr = {
+    <l: @L> <target: Term> DOT <member: Identifier> <r: @R> => Expr {
+        node: ExprKind::MemberAccess {
+            target: Box::new(target),
+            member
+        },
+        location: Location::new(l, r),
+    }
 }
 
 FunCallExpr: Expr = {
@@ -244,3 +353,21 @@ Number: Expr = {
     }
 }
 
+IdentifierMapping: (String, Expr) = {
+    <ident: Identifier> COLON <expr: Expr> => (ident, expr),
+}
+
+IdentifiersMapping: Vec<(String, Expr)> = Separated<IdentifierMapping, COMMA>;
+
+Identifiers: Vec<String> = Separated<Identifier, COMMA>;
+
+StructInitializer: Expr = {
+    // TODO: This amber is here cause otherwise there is a conflict.
+    <l: @L> AMPER <name: Identifier> LBRACE <fields: IdentifiersMapping> RBRACE <r: @R> => Expr {
+        node: ExprKind::StructInitializer {
+            name,
+            fields,
+        },
+        location: Location::new(l, r),
+    }
+}

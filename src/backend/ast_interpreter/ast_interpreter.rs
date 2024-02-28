@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use std::{collections::HashMap, rc::Rc};
 
 use crate::ast::{
-    ExprKind, Operator, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt, TypedStmtKind,
+    ExprKind, Operator, Pattern, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt, TypedStmtKind,
 };
 
 use super::native_functions;
@@ -12,14 +12,28 @@ use super::native_functions::NativeFunction;
 const MAIN_FUNCTION_NAME: &str = "main";
 
 #[derive(Clone)]
+pub struct StructValue {
+    name: String,
+    fields: HashMap<String, Value>,
+}
+
+#[derive(Clone)]
 pub enum Value {
     Integer(i64),
     Float(f64),
     String(Rc<String>),
     Bool(bool),
     Unit,
-    Function { body: TypedExpr },
+    Function {
+        body: TypedExpr,
+    },
     NativeFunction(native_functions::NativeFunction),
+    Constructor(String),
+    Struct(StructValue),
+    Variant {
+        name: String,
+        fields: Rc<Vec<Value>>,
+    },
 }
 
 impl Display for Value {
@@ -32,6 +46,21 @@ impl Display for Value {
             Value::Unit => write!(f, "()"),
             Value::Function { .. } => write!(f, "Function"),
             Value::NativeFunction(_) => write!(f, "NativeFunction"),
+            Value::Struct(StructValue { name, fields }) => {
+                write!(f, "{} {{", name)?;
+                for (field, value) in fields.iter() {
+                    write!(f, "{}: {}, ", field, value)?;
+                }
+                write!(f, "}}")
+            }
+            Value::Variant { name, fields } => {
+                write!(f, "{}(", name)?;
+                for field in fields.iter() {
+                    write!(f, "{}, ", field)?;
+                }
+                write!(f, ")")
+            }
+            Value::Constructor(name) => write!(f, "Constructor({})", name),
         }
     }
 }
@@ -115,6 +144,9 @@ impl Interpreter {
                 TypedDeclKind::FunDecl { body, .. } => Some(Value::Function {
                     body: *body.clone(),
                 }),
+                TypedDeclKind::VariantConstructor { name, .. } => {
+                    Some(Value::Constructor(name.clone()))
+                }
                 _ => None,
             };
 
@@ -125,6 +157,67 @@ impl Interpreter {
         Interpreter {
             call_stack: CallStack::new(),
             globals,
+        }
+    }
+
+    pub fn try_match(
+        &mut self,
+        pattern: &Pattern,
+        match_target: &Value,
+    ) -> Option<HashMap<String, Value>> {
+        match (pattern, match_target) {
+            (Pattern::Wildcard, _) => Some(HashMap::new()),
+            (Pattern::Int(pval), Value::Integer(vval)) if pval == vval => Some(HashMap::new()),
+            (Pattern::Boolean(pval), Value::Bool(vval)) if pval == vval => Some(HashMap::new()),
+            (Pattern::String(pval), Value::String(vval)) if pval == vval.as_ref() => {
+                Some(HashMap::new())
+            }
+            (
+                Pattern::Struct {
+                    name: pname,
+                    fields: pfields,
+                },
+                Value::Struct(StructValue {
+                    name: vname,
+                    fields: vfields,
+                }),
+            ) if pname == vname => {
+                let mut ids = HashMap::new();
+                for field in pfields {
+                    let value = vfields.get(field).expect("Field not found").clone();
+                    ids.insert(field.clone(), value.clone());
+                }
+                Some(ids)
+            }
+            (
+                Pattern::Enum {
+                    name: enum_name,
+                    patterns,
+                },
+                Value::Variant {
+                    name: variant_name,
+                    fields,
+                },
+            ) if enum_name == variant_name => {
+                let mut map = HashMap::new();
+                for (pattern, value) in patterns.iter().zip(fields.iter()) {
+                    let ids = self.try_match(pattern, value);
+                    if let Some(ids) = ids {
+                        for (id, value) in ids {
+                            map.insert(id, value);
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                Some(map)
+            }
+            (Pattern::Identifier(id), _) => {
+                let mut map = HashMap::new();
+                map.insert(id.clone(), match_target.clone());
+                Some(map)
+            }
+            _ => None,
         }
     }
 
@@ -144,10 +237,13 @@ impl Interpreter {
                 }
             }
             ExprKind::Compound(stmts, expr) => {
+                self.call_stack.get_env().push();
                 for stmt in stmts {
                     self.interpret_stmt(stmt)?;
                 }
-                self.interpret_expr(expr)
+                let ret = self.interpret_expr(expr);
+                self.call_stack.get_env().pop();
+                ret
             }
             ExprKind::FunCall { target, args } => {
                 // Evaluate arguments with current environment
@@ -174,6 +270,14 @@ impl Interpreter {
                     },
                     Value::NativeFunction(NativeFunction{body, ..}) => {
                         let result = body(args_values)?;
+                        self.call_stack.pop_call();
+                        Ok(result)
+                    },
+                    Value::Constructor(name) => {
+                        let result = Value::Variant {
+                            name,
+                            fields: Rc::new(args_values),
+                        };
                         self.call_stack.pop_call();
                         Ok(result)
                     },
@@ -211,6 +315,46 @@ impl Interpreter {
                     _ => panic!(
                         "Invalid types for binary operator, should be catched by semantic analysis"
                     ),
+                }
+            }
+            ExprKind::Match { target, arms } => {
+                let target = self.interpret_expr(target)?;
+                for arm in arms {
+                    let ids = self.try_match(&arm.pattern, &target);
+                    if let Some(ids) = ids {
+                        self.call_stack.get_env().push();
+                        for (id, value) in ids {
+                            self.call_stack.add_identifier(id, value);
+                        }
+
+                        let result = self.interpret_expr(&arm.body);
+
+                        self.call_stack.get_env().pop();
+                        return result;
+                    }
+                }
+                Err(anyhow!(
+                    "No match found; Should be caught by semantic analysis"
+                ))
+            }
+            ExprKind::StructInitializer { name, fields } => {
+                let vals = fields
+                    .iter()
+                    .map(|(name, expr)| Ok((name.clone(), self.interpret_expr(expr)?)))
+                    .collect::<Result<HashMap<String, Value>>>()?;
+                Ok(Value::Struct(StructValue {
+                    name: name.clone(),
+                    fields: vals,
+                }))
+            }
+            ExprKind::MemberAccess { target, member } => {
+                let target_val = self.interpret_expr(target)?;
+                match target_val {
+                    Value::Struct(StructValue { fields, .. }) => fields
+                        .get(member)
+                        .cloned()
+                        .ok_or_else(|| anyhow!("Field not found: {}", member)),
+                    _ => Err(anyhow!("Member access must be done on a struct")),
                 }
             }
         }
@@ -257,7 +401,7 @@ impl Interpreter {
         self.call_stack.push_call();
         let val = self.interpret_expr(&main_body)?;
         match val {
-            Value::Integer(x) if x > 0 && x < 256 => Ok(x.try_into().unwrap()),
+            Value::Integer(x) if x >= 0 && x < 256 => Ok(x.try_into().unwrap()),
             Value::Integer(_) => Err(anyhow!(
                 "Main function must return unit or integer between 0 and 255"
             )),
@@ -365,6 +509,144 @@ fn main(): Int = {
     let a: Int = 1;
     let b: Int = 2;
     a + b
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_structs() {
+        let ast = parse_ast(
+            "
+struct Pair { x: Int, y: Int }
+
+fn main(): Int = {
+    let a: Pair = &Pair{x: 1, y: 2};
+    a.x + a.y
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_match_primitives() {
+        let ast = parse_ast(
+            "
+fn main(): Int = match 3 {
+    2 => 5,
+    3 => 7,
+    _ => 9,
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 7);
+
+        let ast = parse_ast(
+            "
+fn main(): Int = match 3 {
+    2 => 5,
+    _ => 2,
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 2);
+
+        let ast = parse_ast(
+            "
+fn main(): Int = match true {
+    true => 1,
+    false => 2,
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_match_enums() {
+        let ast = parse_ast(
+            "
+enum List {
+    Cons(Int, List),
+    Nil,
+}
+
+fn main(): Int = match Cons(1, Nil()) {
+    Cons(x, y) => x,
+    Nil() => 0,
+}
+",
+        );
+
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_inner_match() {
+        let ast = parse_ast(
+            "
+enum List {
+    Cons(Int, List),
+    Nil,
+}
+
+fn main(): Int = match Cons(1, Cons(2, Nil())) {
+    Cons(1, Cons(x, _)) => x,
+    _ => 0,
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_match_linked_list() {
+        let ast = parse_ast(
+            "
+enum List {
+    Cons(Int, List),
+    Nil,
+}
+
+fn max(lst: List): Int = match lst {
+    Nil() => 0,
+    Cons(head, tail) => {
+        let max_tail = max(tail);
+        if head > max_tail {
+            head
+        } else {
+            max_tail
+        }
+    }
+}
+
+fn main(): Int = {
+    let lst = Cons(1, Cons(3, Cons(2, Nil())));
+    max(lst)
+}
+",
+        );
+        let mut interpreter = Interpreter::new(ast.unwrap());
+        assert_eq!(interpreter.interpret().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_match_struct() {
+        let ast = parse_ast(
+            "
+struct Pair { x: Int, y: Int }
+
+fn main(): Int = match &Pair{x: 1, y: 2} {
+    Pair{x, y} => x + y,
 }
 ",
         );
