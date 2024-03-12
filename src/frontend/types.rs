@@ -1,32 +1,24 @@
 use crate::frontend::utils::TypedIdentifier;
 use std::{collections::HashMap, fmt::Display, rc::Rc};
 
+type IndirectType = String;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter {
+    pub name: String,
+    pub ty: IndirectType,
+}
+
 #[derive(Debug, Clone)]
 pub struct FunctionType {
-    pub parameters: Vec<TypedIdentifier>,
-    pub return_type: Rc<Type>,
+    pub parameters: Vec<Parameter>,
+    pub return_type: IndirectType,
 }
 
 impl FunctionType {
-    pub fn check_args(&self, args: &[Rc<Type>]) -> bool {
-        if self.parameters.len() != args.len() {
-            return false;
-        }
-        self.parameters
-            .iter()
-            .zip(args)
-            .all(|(expected, actual)| expected.ty.is_same(actual))
-    }
-
     pub fn wrap(&self) -> Rc<Type> {
         Type::FunctionType(Box::new(self.clone())).into()
     }
-}
-
-pub struct StructType {
-    pub fields: HashMap<String, Rc<Type>>,
-    pub methods: HashMap<String, FunctionType>,
-    pub implemented_traits: Vec<String>,
 }
 
 pub struct Trait {
@@ -54,15 +46,28 @@ impl Display for BuiltInType {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructType {
+    pub name: String,
+    pub fields: HashMap<String, IndirectType>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumVariantType {
+    pub name: String,
+    pub fields: Vec<IndirectType>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumType {
+    pub name: String,
+    pub variants: Vec<EnumVariantType>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Type {
     BuiltIn(BuiltInType),
-    #[allow(dead_code)]
-    Struct {
-        fields: HashMap<String, Type>,
-        methods: HashMap<String, FunctionType>,
-    },
-    #[allow(dead_code)]
-    Enum(Vec<(String, Type)>),
+    Struct(StructType),
+    Enum(EnumType),
     FunctionType(Box<FunctionType>),
 }
 
@@ -70,18 +75,9 @@ impl Type {
     pub fn is_same(&self, other: &Self) -> bool {
         match (self, other) {
             (Type::BuiltIn(a), Type::BuiltIn(b)) => a == b,
-            (
-                Type::Struct {
-                    fields: f1,
-                    methods: m1,
-                },
-                Type::Struct {
-                    fields: f2,
-                    methods: m2,
-                },
-            ) => todo!(),
-            (Type::Enum(fields1), Type::Enum(fields2)) => todo!(),
             (Type::FunctionType(f1), Type::FunctionType(f2)) => todo!(),
+            (Type::Struct(s1), Type::Struct(s2)) => s1.name == s2.name,
+            (Type::Enum(e1), Type::Enum(e2)) => e1.name == e2.name,
             _ => false,
         }
     }
@@ -125,8 +121,30 @@ impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let as_str = match self {
             Type::BuiltIn(b) => b.to_string(),
-            Type::Struct { .. } => "Struct".to_string(),
-            Type::Enum(_) => "Enum".to_string(),
+            Type::Struct(StructType { name, fields }) => {
+                let fields_str = fields
+                    .iter()
+                    .map(|(name, ty)| format!("{}: {}", name, ty))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("struct {} {{{}}}", name, fields_str)
+            }
+            Type::Enum(EnumType { name, variants }) => {
+                let variants_str = variants
+                    .iter()
+                    .map(|v| {
+                        let fields_str = v
+                            .fields
+                            .iter()
+                            .map(|ty| ty.to_string())
+                            .collect::<Vec<String>>()
+                            .join(", ");
+                        format!("{}({})", v.name, fields_str)
+                    })
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("enum {} {{{}}}", name, variants_str)
+            }
             Type::FunctionType(_) => "Function".to_string(),
         };
         f.write_str(&as_str)

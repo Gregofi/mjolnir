@@ -1,7 +1,8 @@
+use std::fmt::Display;
 use std::rc::Rc;
 
 use crate::frontend::types::Type;
-use crate::frontend::utils::{TypedIdentifier, WeaklyTypedIdentifier};
+use crate::frontend::utils::{StronglyTypedIdentifier, TypedIdentifier, WeaklyTypedIdentifier};
 
 #[derive(Clone)]
 pub struct Location {
@@ -50,6 +51,58 @@ impl From<&str> for Operator {
 }
 
 #[derive(Clone)]
+pub struct MatchArm<Ex> {
+    pub pattern: Pattern,
+    pub cond: Option<Box<Ex>>,
+    pub body: Box<Ex>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Pattern {
+    Wildcard, // _
+    Int(i64),
+    Boolean(bool),
+    String(String),
+    // Foo{foo, bar}
+    Struct {
+        name: String,
+        fields: Vec<String>,
+    },
+    // Foo(Bar(Int), String)
+    Enum {
+        name: String,
+        patterns: Vec<Pattern>,
+    },
+    Identifier(String),
+}
+
+impl Display for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Pattern::Wildcard => write!(f, "_"),
+            Pattern::Int(x) => write!(f, "{}", x),
+            Pattern::Boolean(x) => write!(f, "{}", x),
+            Pattern::String(x) => write!(f, "{}", x),
+            Pattern::Struct { name, fields } => {
+                let fields_str = fields.join(", ");
+                write!(f, "struct {} {{{}}}", name, fields_str)?;
+                Ok(())
+            }
+            Pattern::Enum { name, patterns } => {
+                let patterns_str = patterns
+                    .iter()
+                    .map(|p| format!("{}", p))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "enum {}({})", name, patterns_str)?;
+                Ok(())
+            }
+            Pattern::Identifier(x) => write!(f, "{}", x),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum ExprKind<St, Ex> {
     Unit,
     Int(i64),
@@ -69,6 +122,18 @@ pub enum ExprKind<St, Ex> {
         op: Operator,
         lhs: Box<Ex>,
         rhs: Box<Ex>,
+    },
+    Match {
+        target: Box<Ex>,
+        arms: Vec<MatchArm<Ex>>,
+    },
+    StructInitializer {
+        name: String,
+        fields: Vec<(String, Ex)>,
+    },
+    MemberAccess {
+        target: Box<Ex>,
+        member: String,
     },
 }
 
@@ -100,6 +165,12 @@ pub struct TypedVarDecl {
 }
 
 #[derive(Clone)]
+pub struct EnumVariant {
+    pub name: String,
+    pub fields: Vec<StronglyTypedIdentifier>,
+}
+
+#[derive(Clone)]
 pub enum DeclKind {
     FunDecl {
         name: String,
@@ -112,13 +183,13 @@ pub enum DeclKind {
     #[allow(dead_code)]
     StructDecl {
         name: String,
-        fields: Vec<WeaklyTypedIdentifier>,
+        fields: Vec<StronglyTypedIdentifier>,
     },
     // We allow writing variants similar to structs.
     #[allow(dead_code)]
     EnumDecl {
         name: String,
-        variants: Vec<WeaklyTypedIdentifier>,
+        variants: Vec<EnumVariant>,
     },
     #[allow(dead_code)]
     TraitDecl {
@@ -140,8 +211,24 @@ pub enum TypedDeclKind {
         return_type: Rc<Type>,
         body: Box<TypedExpr>,
     },
-    #[allow(dead_code)]
     VarDecl(TypedVarDecl),
+    StructDecl {
+        name: String,
+        fields: Vec<TypedIdentifier>,
+    },
+    // Enum decls are important when interpreting,
+    // because each variant is a constructor (function).
+    EnumDecl {
+        name: String,
+        variants: Vec<EnumVariant>,
+    },
+    VariantConstructor {
+        name: String,
+        // We don't need types here, because they are already
+        // stored in the enum decl. This is only used when
+        // interpreting and then the types are already correct.
+        fields_count: usize,
+    },
 }
 
 #[derive(Clone)]
