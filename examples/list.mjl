@@ -1,33 +1,22 @@
+enum Option[T] {
+    Some(T),
+    None,
+}
+
 enum List[T] {
-    Cons(T, List),
+    Cons(T, List[T]),
     Nil,
 }
 
-impl List[T] {
-    fn new(): List[T] = Nil
-
-    fn prepend(self, n: T): List[T] = Cons(n, self)
-
-    fn empty(self): Bool = match self {
-        Cons(h, t) => false,
-        Nil => true,
-    }
-
-    fn find(self, n: T): Bool = match self {
-        Cons(head, tail) if head == tail => true,
-        Cons(head, tail) => tail.find(n),
-        Nil => false,
-    }
-
-    fn append(self, n: Int): List[T] = match self {
-        Cons(H, T) => Cons(H, T.append(n)),
-        Nil => Cons(n, List::Nil),
-    }
+fn find[T](lst: List[T], n: T): Bool = match lst {
+    Cons(head, tail) if head == n => true,
+    Cons(head, tail) => find(tail, n),
+    Nil => false,
 }
 
 fn main(): Int = {
-    let lst = List::new().append(0).append(1).append(2).append(3);
-    let exists = lst.find(2);
+    let lst = Cons(0, Cons(1, Cons(2, Cons(3, Nil()))));
+    let exists = find(lst, 2);
     if exists {
         0
     } else {

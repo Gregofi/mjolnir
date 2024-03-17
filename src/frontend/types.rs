@@ -1,24 +1,19 @@
-use crate::frontend::utils::TypedIdentifier;
 use std::{collections::HashMap, fmt::Display, rc::Rc};
 
-type IndirectType = String;
+use super::utils::GenericDeclaration;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+type TypeIndex = String;
+
+#[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: String,
-    pub ty: IndirectType,
+    pub ty: InstantiatedType,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionType {
     pub parameters: Vec<Parameter>,
-    pub return_type: IndirectType,
-}
-
-impl FunctionType {
-    pub fn wrap(&self) -> Rc<Type> {
-        Type::FunctionType(Box::new(self.clone())).into()
-    }
+    pub return_type: InstantiatedType,
 }
 
 pub struct Trait {
@@ -48,13 +43,13 @@ impl Display for BuiltInType {
 #[derive(Debug, Clone)]
 pub struct StructType {
     pub name: String,
-    pub fields: HashMap<String, IndirectType>,
+    pub fields: HashMap<String, InstantiatedType>,
 }
 
 #[derive(Debug, Clone)]
 pub struct EnumVariantType {
     pub name: String,
-    pub fields: Vec<IndirectType>,
+    pub fields: Vec<InstantiatedType>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,64 +59,106 @@ pub struct EnumType {
 }
 
 #[derive(Debug, Clone)]
-pub enum Type {
+pub enum TypeKind {
     BuiltIn(BuiltInType),
     Struct(StructType),
     Enum(EnumType),
-    FunctionType(Box<FunctionType>),
+    Function(FunctionType),
 }
 
-impl Type {
+/// Represents a type that is not bound to any AST node, and is "abstract". For example, a `Struct
+/// Foo<T> { x: T }` would not be bound, it is a kind of scheme for types. The InstantiatedType
+/// would be one bound to a specific TypeInfo, because it knows about instantiated generics.
+#[derive(Debug, Clone)]
+pub struct TypeInfo {
+    pub kind: TypeKind,
+    pub generics: Vec<GenericDeclaration>,
+}
+
+/// Represents a type as it is written, for example `List[Option[T]]`.
+#[derive(Debug, Clone)]
+pub struct InstantiatedType {
+    // TODO: Consider replacing this with Rc<TypeInfo>
+    // If we do this, be careful that this is used
+    // by the StructType and friends, and it represents
+    // for example Struct x { foo: Option<T> }
+    //                             ^^^^^^^^^
+    pub ty: TypeIndex,
+    pub generics: Vec<InstantiatedType>,
+}
+
+impl InstantiatedType {
+    pub fn get_primitive(name: &str) -> Self {
+        InstantiatedType {
+            ty: name.to_string(),
+            generics: vec![],
+        }
+    }
+}
+
+impl Display for InstantiatedType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let generics = if self.generics.is_empty() {
+            "".to_string()
+        } else {
+            format!(
+                "<{}>",
+                self.generics
+                    .iter()
+                    .map(|g| g.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )
+        };
+        write!(f, "{}{}", self.ty, generics)
+    }
+}
+
+impl TypeKind {
     pub fn is_same(&self, other: &Self) -> bool {
         match (self, other) {
-            (Type::BuiltIn(a), Type::BuiltIn(b)) => a == b,
-            (Type::FunctionType(f1), Type::FunctionType(f2)) => todo!(),
-            (Type::Struct(s1), Type::Struct(s2)) => s1.name == s2.name,
-            (Type::Enum(e1), Type::Enum(e2)) => e1.name == e2.name,
+            (TypeKind::BuiltIn(a), TypeKind::BuiltIn(b)) => a == b,
+            (TypeKind::Function(_), TypeKind::Function(_)) => todo!(),
+            (TypeKind::Struct(s1), TypeKind::Struct(s2)) => s1.name == s2.name,
+            (TypeKind::Enum(e1), TypeKind::Enum(e2)) => e1.name == e2.name,
             _ => false,
         }
     }
 
     pub fn is_bool(&self) -> bool {
-        match self {
-            Type::BuiltIn(BuiltInType::Bool) => true,
-            _ => false,
-        }
+        matches!(self, TypeKind::BuiltIn(BuiltInType::Bool))
     }
 
     #[allow(dead_code)]
     pub fn is_int(&self) -> bool {
-        match self {
-            Type::BuiltIn(BuiltInType::Int) => true,
-            _ => false,
-        }
+        matches!(self, TypeKind::BuiltIn(BuiltInType::Int))
     }
 
-    pub fn get_bool() -> Rc<Type> {
-        Type::BuiltIn(BuiltInType::Bool).into()
+    pub fn get_bool() -> Rc<TypeKind> {
+        TypeKind::BuiltIn(BuiltInType::Bool).into()
     }
 
-    pub fn get_int() -> Rc<Type> {
-        Type::BuiltIn(BuiltInType::Int).into()
+    pub fn get_int() -> Rc<TypeKind> {
+        TypeKind::BuiltIn(BuiltInType::Int).into()
     }
 
-    pub fn get_unit() -> Rc<Type> {
-        Type::BuiltIn(BuiltInType::Unit).into()
+    pub fn get_unit() -> Rc<TypeKind> {
+        TypeKind::BuiltIn(BuiltInType::Unit).into()
     }
 
     pub fn as_function(&self) -> Option<&FunctionType> {
         match self {
-            Type::FunctionType(f) => Some(f),
+            TypeKind::Function(f) => Some(f),
             _ => None,
         }
     }
 }
 
-impl Display for Type {
+impl Display for TypeKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let as_str = match self {
-            Type::BuiltIn(b) => b.to_string(),
-            Type::Struct(StructType { name, fields }) => {
+            TypeKind::BuiltIn(b) => b.to_string(),
+            TypeKind::Struct(StructType { name, fields }) => {
                 let fields_str = fields
                     .iter()
                     .map(|(name, ty)| format!("{}: {}", name, ty))
@@ -129,7 +166,7 @@ impl Display for Type {
                     .join(", ");
                 format!("struct {} {{{}}}", name, fields_str)
             }
-            Type::Enum(EnumType { name, variants }) => {
+            TypeKind::Enum(EnumType { name, variants }) => {
                 let variants_str = variants
                     .iter()
                     .map(|v| {
@@ -145,7 +182,7 @@ impl Display for Type {
                     .join(", ");
                 format!("enum {} {{{}}}", name, variants_str)
             }
-            Type::FunctionType(_) => "Function".to_string(),
+            TypeKind::Function(_) => "Function".to_string(),
         };
         f.write_str(&as_str)
     }

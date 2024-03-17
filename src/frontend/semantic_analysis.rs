@@ -1,3 +1,6 @@
+/// Currently unused. Most of the job that this module did is in
+/// type inference now.
+
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -11,6 +14,16 @@ use anyhow::{Context, Result};
 
 use super::types::StructType;
 use super::types::{EnumType, Parameter};
+
+struct TypeVariable(usize);
+
+static ID_COUNTER: usize = 0;
+
+macro_rules! tvar {
+    () => {
+        TypeVariable(ID_COUNTER)
+    };
+}
 
 // TODO: Why we save this and not whole typed Decl?
 struct IdentInfo {
@@ -29,13 +42,13 @@ impl<T> Environment<T> {
     }
 }
 
-pub struct SymbolTable<T> {
-    pub identifiers: Vec<Environment<T>>,
+pub struct SymbolTable {
+    pub identifiers: Vec<Environment<Rc<Type>>>,
     types: HashMap<String, Rc<Type>>,
     decls: HashMap<String, TypedDecl>,
 }
 
-impl<T> SymbolTable<T> {
+impl SymbolTable {
     fn predefined_types() -> HashMap<String, Rc<Type>> {
         let mut types = HashMap::new();
         types.insert("Int".to_string(), Type::get_int());
@@ -93,7 +106,7 @@ impl<T> SymbolTable<T> {
         self.identifiers.pop();
     }
 
-    pub fn insert(&mut self, name: String, value: T) {
+    pub fn insert(&mut self, name: String, value: Rc<Type>) {
         self.identifiers
             .last_mut()
             .unwrap()
@@ -101,7 +114,7 @@ impl<T> SymbolTable<T> {
             .insert(name, value);
     }
 
-    pub fn get(&self, name: &str) -> Option<&T> {
+    pub fn get(&self, name: &str) -> Option<&Rc<Type>> {
         self.identifiers
             .iter()
             .rev()
@@ -135,11 +148,7 @@ impl<T> SymbolTable<T> {
 }
 
 impl StructType {
-    fn get_member_type(
-        &self,
-        member: &str,
-        env: &SymbolTable<IdentInfo>,
-    ) -> Option<Result<Rc<Type>>> {
+    fn get_member_type(&self, member: &str, env: &SymbolTable) -> Option<Result<Rc<Type>>> {
         self.fields.get(member).map(|ty| -> Result<_> {
             let ty = env
                 .get_type(ty)
@@ -151,7 +160,7 @@ impl StructType {
 }
 
 impl FunctionType {
-    fn get_param_types(&self, env: &SymbolTable<IdentInfo>) -> Result<Vec<Rc<Type>>> {
+    fn get_param_types(&self, env: &SymbolTable) -> Result<Vec<Rc<Type>>> {
         self.parameters
             .iter()
             .map(|param| {
@@ -166,7 +175,7 @@ impl FunctionType {
             .collect::<Result<Vec<_>>>()
     }
 
-    fn check_args(&self, env: &SymbolTable<IdentInfo>, arg_types: &[Rc<Type>]) -> bool {
+    fn check_args(&self, env: &SymbolTable, arg_types: &[Rc<Type>]) -> bool {
         if self.parameters.len() != arg_types.len() {
             false
         } else {
@@ -179,20 +188,15 @@ impl FunctionType {
     }
 }
 
-fn prepare_native_functions(env: &mut SymbolTable<IdentInfo>) {
+fn prepare_native_functions(env: &mut SymbolTable) {
     let natives = crate::backend::ast_interpreter::native_functions::get_native_functions();
     for native in natives {
-        env.insert(
-            native.name.clone(),
-            IdentInfo {
-                ty: native.ty.wrap(),
-            },
-        );
+        env.insert(native.name.clone(), native.ty.wrap());
     }
 }
 
 pub fn semantic_analysis(ast: &Vec<Decl>) -> Result<HashMap<String, TypedDecl>> {
-    let mut symbols = SymbolTable::<IdentInfo>::new();
+    let mut symbols = SymbolTable::new();
     symbols.push();
 
     prepare_native_functions(&mut symbols);
@@ -211,7 +215,7 @@ pub fn semantic_analysis(ast: &Vec<Decl>) -> Result<HashMap<String, TypedDecl>> 
 fn analyse_match_arm(
     target: &Rc<Type>,
     pattern: &Pattern,
-    env: &SymbolTable<IdentInfo>,
+    env: &SymbolTable,
 ) -> Result<Vec<TypedIdentifier>> {
     println!("Analyse match arm: {} <=> {:?}", target, pattern);
     match (target.as_ref(), pattern) {
@@ -291,7 +295,7 @@ fn analyse_match_arm(
 fn analyse_match(
     target: &Expr,
     arms: &[MatchArm<Expr>],
-    env: &mut SymbolTable<IdentInfo>,
+    env: &mut SymbolTable,
 ) -> Result<TypedExpr> {
     let target = analyse_expr(target, env)?;
 
@@ -305,7 +309,7 @@ fn analyse_match(
             env.push();
             for id in identifiers {
                 println!("add id: {}", id.name);
-                env.insert(id.name, IdentInfo { ty: id.ty });
+                env.insert(id.name, id.ty);
             }
             let typed_body = analyse_expr(&arm.body, env)?;
 
@@ -353,7 +357,7 @@ fn analyse_match(
     }
 }
 
-fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExpr> {
+fn analyse_expr(ast: &Expr, env: &mut SymbolTable) -> Result<TypedExpr> {
     match &ast.node {
         ExprKind::Unit => Ok(TypedExpr {
             node: ExprKind::Unit,
@@ -369,7 +373,7 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
             let id = env.get(name);
             match id {
                 Some(id) => {
-                    let ty = id.ty.clone();
+                    let ty = id.clone();
                     Ok(TypedExpr {
                         node: ExprKind::Identifier(name.clone()),
                         location: ast.location.clone(),
@@ -532,13 +536,13 @@ fn analyse_expr(ast: &Expr, env: &mut SymbolTable<IdentInfo>) -> Result<TypedExp
     }
 }
 
-fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<TypedVarDecl> {
+fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable) -> Result<TypedVarDecl> {
     let typed_value = analyse_expr(&decl.value, env)?;
-    match &decl.ty {
+    match &decl.inferred_ty.unwrap() {
         Some(ty) => {
             let type_ = env
-                .get_type(ty)
-                .with_context(|| format!("Type '{}' not declared", ty))?;
+                .get_type(&ty.name)
+                .with_context(|| format!("Type '{}' not declared", ty.name))?;
             if !typed_value.ty.is_same(type_) {
                 Err(anyhow::anyhow!(
                     "Declared type '{}' does not match value type '{}'",
@@ -564,7 +568,7 @@ fn type_var_decl(decl: &VarDecl, env: &mut SymbolTable<IdentInfo>) -> Result<Typ
 /// In structs, when the type is not known in the SymbolTable, it is added as
 /// untyped (string name). The actual type is then searched in the SymbolTable
 /// in semantic_analysis.
-fn prepare_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
+fn prepare_decl(ast: &Decl, env: &mut SymbolTable) -> Result<()> {
     match &ast.node {
         DeclKind::FunDecl {
             name,
@@ -581,7 +585,7 @@ fn prepare_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
                         .context("Parameters must by typed explicitely")?;
                     Ok(Parameter {
                         name: param.name.clone(),
-                        ty,
+                        ty: ty.name,
                     })
                 })
                 .collect::<Result<_>>()?;
@@ -591,50 +595,52 @@ fn prepare_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
                 .clone();
             let funtype = Rc::new(Type::FunctionType(Box::new(FunctionType {
                 parameters,
-                return_type,
+                return_type: return_type.name,
             })));
-            env.insert(name.clone(), IdentInfo { ty: funtype });
+            env.insert(name.clone(), funtype);
         }
-        DeclKind::StructDecl { name, fields } => {
+        DeclKind::StructDecl { name, fields, .. } => {
             let fields = fields.iter().fold(HashMap::new(), |mut acc, item| {
                 acc.insert(item.name.clone(), item.ty.clone());
                 acc
             });
             let struct_type = Rc::new(Type::Struct(StructType {
                 name: name.clone(),
-                fields,
+                fields: todo!(),
             }));
             env.insert_type(name.clone(), struct_type.clone());
         }
         // Enum is most fun, because the constructor of variants that are
         // written as `enum List { Cons(Int, List), Nil }` have to be
         // transformed into free functions, so that you can do things like
-        // lst.fold(Nil, (elem, acc) => Cons(elem, acc))
+        // lst.fold(Nil(), Cons)
         DeclKind::EnumDecl {
             name: enum_name,
             variants,
+            generics,
         } => {
             let mut variants_mapped = vec![];
             // Collect variant type names, also create the corresponding costructors.
             for variant in variants {
-                let variant_fields: Vec<_> = variant.fields.iter().map(|f| f.ty.clone()).collect();
-                let parameters = variant_fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, ty)| Parameter {
-                        name: i.to_string(),
-                        ty: ty.clone(),
-                    })
-                    .collect();
-                let funtype = Rc::new(Type::FunctionType(Box::new(FunctionType {
-                    parameters,
-                    return_type: enum_name.clone(),
-                })));
-                env.insert(variant.name.clone(), IdentInfo { ty: funtype });
-                variants_mapped.push(EnumVariantType {
-                    name: variant.name.clone(),
-                    fields: variant_fields,
-                });
+                todo!()
+                // let variant_fields: Vec<_> = variant.fields.iter().map(|f| f.ty.clone()).collect();
+                // let parameters = variant_fields
+                //     .iter()
+                //     .enumerate()
+                //     .map(|(i, ty)| Parameter {
+                //         name: i.to_string(),
+                //         ty: todo!(),
+                //     })
+                //     .collect();
+                // let funtype = Rc::new(Type::FunctionType(Box::new(FunctionType {
+                //     parameters,
+                //     return_type: enum_name.clone(),
+                // })));
+                // env.insert(variant.name.clone(), funtype);
+                // variants_mapped.push(EnumVariantType {
+                //     name: variant.name.clone(),
+                //     fields: todo!(),
+                // });
             }
 
             let enum_type = Rc::new(Type::Enum(EnumType {
@@ -648,13 +654,12 @@ fn prepare_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
     Ok(())
 }
 
-fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
+fn analyse_decl(ast: &Decl, env: &mut SymbolTable) -> Result<()> {
     match &ast.node {
         DeclKind::FunDecl { name, body, .. } => {
             let typed = env
                 .get(name)
                 .expect("Function must be prepared by prepare_decl; Compiler bug")
-                .ty
                 .clone();
             let typed = typed.as_function().context("Not a function")?;
             let return_ty = env.get_type(&typed.return_type).unwrap().clone();
@@ -668,12 +673,7 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
                         format!("Unknown type '{}' for parameter '{}'", param.ty, param.name)
                     })?
                     .clone();
-                env.insert(
-                    param.name.clone(),
-                    IdentInfo {
-                        ty: param_type.clone(),
-                    },
-                );
+                env.insert(param.name.clone(), param_type.clone());
                 typed_params.push(TypedIdentifier {
                     name: param.name.clone(),
                     ty: param_type,
@@ -723,32 +723,15 @@ fn analyse_decl(ast: &Decl, env: &mut SymbolTable<IdentInfo>) -> Result<()> {
             ()
         }
         DeclKind::TraitDecl { name, methods } => todo!(),
-        DeclKind::VarDecl(var_decl) => {
-            let typed_decl = type_var_decl(var_decl, env)?;
-
-            // TODO: This may not be enough with global variables.
-            // we will see when we implement interpreting.
-            env.insert(
-                var_decl.name.clone(),
-                IdentInfo {
-                    ty: typed_decl.value.ty.clone(),
-                },
-            );
-        }
     }
     Ok(())
 }
 
-fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<TypedStmt> {
+fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable) -> Result<TypedStmt> {
     let node = match &ast.node {
         StmtKind::VarDecl(var_decl) => {
             let typed_decl = type_var_decl(var_decl, env)?;
-            env.insert(
-                var_decl.name.clone(),
-                IdentInfo {
-                    ty: typed_decl.value.ty.clone(),
-                },
-            );
+            env.insert(var_decl.name.clone(), typed_decl.value.ty.clone());
             TypedStmtKind::VarDecl(typed_decl)
         }
         StmtKind::Expr(expr) => {
@@ -766,7 +749,6 @@ fn analyse_stmt(ast: &Stmt, env: &mut SymbolTable<IdentInfo>) -> Result<TypedStm
 #[cfg(test)]
 mod tests {
     use super::*;
-    // TODO: ??? ;)
     use crate::frontend::parser::parse_ast;
 
     #[test]

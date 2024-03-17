@@ -10,7 +10,7 @@ pub fn parse_ast(input: &str) -> Result<Vec<Decl>> {
     // we should parse the error from parse here and show proper error message.
     grammar::TopLevelDeclsParser::new()
         .parse(input)
-        .map_err(|_| anyhow!("Parse error"))
+        .map_err(|err| anyhow!("Parse error: {:?}", err))
 }
 
 #[cfg(test)]
@@ -19,6 +19,7 @@ mod test {
 
     #[test]
     fn test_simple_function() {
+        parse_ast("fn main() = true").unwrap();
         assert!(parse_ast("fn main() = 1").is_ok());
         assert!(parse_ast("fn main() = 1\n").is_ok());
         assert!(parse_ast("fn main(): Int = 1").is_ok());
@@ -181,6 +182,46 @@ fn main() = match a {
     Cons(head, tail) => 2,
     Nil() => 3,
 }
+"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_generics() {
+        assert!(parse_ast(
+            "
+enum List[T] {
+    Cons(T, List[T]),
+    Nil,
+}
+
+fn main() = match Cons(1, a) {
+    Cons(head, tail) => 2,
+    Nil() => 3,
+}
+"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_function_types() {
+        assert!(parse_ast(
+            "
+fn main(f: (Int) => Int) = f(1)
+"
+        )
+        .is_ok());
+        assert!(parse_ast(
+            "
+fn main(f: (Int, List[T]) => List[T]) = f(1)
+"
+        )
+        .is_ok());
+        assert!(parse_ast(
+            "
+fn main(f: (Int) => (Int) => (Int) => Int) = f(1)
 "
         )
         .is_ok());

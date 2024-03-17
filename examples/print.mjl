@@ -1,3 +1,0 @@
-fn main(): Unit = {
-    iprintln(42);
-}
