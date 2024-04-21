@@ -1,2 +1,2 @@
-pub mod ast_interpreter;
+pub mod interpreter;
 pub mod native_functions;

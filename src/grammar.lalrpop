@@ -1,5 +1,5 @@
 use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern};
-use crate::frontend::utils::{WeaklyTypedIdentifier, StronglyTypedIdentifier};
+use crate::frontend::utils::{WeaklyTypedIdentifier, StronglyTypedIdentifier, WrittenType, GenericDeclaration, TypeDeclaration};
 use std::str::FromStr;
 
 
@@ -62,40 +62,51 @@ pub TopLevelDecls: Vec<Decl> = {
 }
 
 TopLevelDecl: Decl = {
-    FunDecl => <>,
-    StructDecl => <>,
-    EnumDecl => <>,
+    FunDecl,
+    StructDecl,
+    EnumDecl,
 }
 
 FunDecl: Decl = {
-    <l: @L> FN <name: Identifier> LPAREN <parameters: MaybeTypedIdentifiers> RPAREN <return_type: (COLON <Identifier>)?> ASSIGN <body: Expr> <r: @R> => Decl {
-        node: DeclKind::FunDecl{name, parameters, return_type, body: Box::new(body)},
-        location: Location::new(l, r),
-    }
+    // TODO: Generics in function name
+    <l: @L> FN <name: TypeDeclaration> LPAREN <parameters: MaybeTypedIdentifiers> RPAREN <return_type: (COLON <WrittenType>)?> ASSIGN <body: Expr> <r: @R> => Decl::new(
+        DeclKind::FunDecl {
+            name: name.name,
+            parameters,
+            return_type,
+            body: Box::new(body),
+            generics: name.generics,
+            inferred_return_type: None,
+            inferred_parameters: None,
+        },
+        Location::new(l, r),
+    )
 }
 
 VarDecl: VarDecl = {
-    LET <name: Identifier> <return_type: (COLON <Identifier>)?> ASSIGN <value: Expr> => VarDecl {
+    LET <name: Identifier> <return_type: (COLON <WrittenType>)?> ASSIGN <value: Expr> => VarDecl {
         name,
         ty: return_type,
         value: Box::new(value),
+        inferred_ty: None,
     }
 }
 
 StructDecl: Decl = {
-    <l: @L> STRUCT <name: Identifier> LBRACE <fields: TypedIdentifiers> RBRACE <r: @R> => Decl {
-        node: DeclKind::StructDecl {
-            name,
+    <l: @L> STRUCT <typename: TypeDeclaration> LBRACE <fields: TypedIdentifiers> RBRACE <r: @R> => Decl::new(
+        DeclKind::StructDecl {
+            name: typename.name,
             fields,
+            generics: typename.generics,
         },
-        location: Location::new(l, r),
-    }
+        Location::new(l, r),
+    )
 }
 
 EnumVariant: EnumVariant = {
-    <name: Identifier> LPAREN <fields: Identifiers> RPAREN => EnumVariant {
+    <name: Identifier> LPAREN <fields: WrittenTypes> RPAREN => EnumVariant {
         name,
-        fields: fields.into_iter().enumerate().map(|(i, ty)| StronglyTypedIdentifier{name: i.to_string(), ty}).collect(),
+        fields,
     },
     <name: Identifier> => EnumVariant {
         name,
@@ -106,19 +117,20 @@ EnumVariant: EnumVariant = {
 EnumVariants: Vec<EnumVariant> = Separated<EnumVariant, COMMA>;
 
 EnumDecl: Decl = {
-    <l: @L> ENUM <name: Identifier> LBRACE <variants: EnumVariants> RBRACE <r: @R> => Decl {
-        node: DeclKind::EnumDecl {
-            name,
+    <l: @L> ENUM <typename: TypeDeclaration> LBRACE <variants: EnumVariants> RBRACE <r: @R> => Decl::new(
+        DeclKind::EnumDecl {
+            name: typename.name,
             variants,
+            generics: typename.generics,
         },
-        location: Location::new(l, r),
-    }
+        Location::new(l, r),
+    )
 }
 
 MaybeTypedIdentifiers: Vec<WeaklyTypedIdentifier> = Separated<MaybeTypedIdentifier, COMMA>;
 
 MaybeTypedIdentifier: WeaklyTypedIdentifier = {
-    <name: Identifier> <ty: (COLON <Identifier>)?> => WeaklyTypedIdentifier {
+    <name: Identifier> <ty: (COLON <WrittenType>)?> => WeaklyTypedIdentifier {
         name,
         ty,
     }
@@ -127,7 +139,7 @@ MaybeTypedIdentifier: WeaklyTypedIdentifier = {
 TypedIdentifiers: Vec<StronglyTypedIdentifier> = Separated<TypedIdentifier, COMMA>;
 
 TypedIdentifier: StronglyTypedIdentifier = {
-    <name: Identifier> COLON <ty: Identifier> => StronglyTypedIdentifier {
+    <name: Identifier> COLON <ty: WrittenType> => StronglyTypedIdentifier {
         name,
         ty,
     }
@@ -175,6 +187,7 @@ Expr: Expr = {
         Expr {
             node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
             location: Location::new(l, r),
+            inferred_ty: None,
         }
     },
     #[precedence(level="2")] #[assoc(side="left")]
@@ -182,6 +195,7 @@ Expr: Expr = {
         Expr {
             node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
             location: Location::new(l, r),
+            inferred_ty: None,
         }
     },
     #[precedence(level="3")] #[assoc(side="left")]
@@ -189,6 +203,7 @@ Expr: Expr = {
         Expr {
             node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
             location: Location::new(l, r),
+            inferred_ty: None,
         }
     },
 }
@@ -233,6 +248,7 @@ Compound: Expr = {
             None => Box::new(Expr {
                 location: Location::new(l, r), // Not totaly accurate
                 node: ExprKind::Unit,
+                inferred_ty: None,
             })
         };
         Expr {
@@ -241,6 +257,7 @@ Compound: Expr = {
                 final_expr,
             ),
             location: Location::new(l, r),
+            inferred_ty: None,
         }
     }
 }
@@ -253,6 +270,7 @@ Match: Expr = {
             arms,
         },
         location: Location::new(l, r),
+        inferred_ty: None,
     }
 }
 
@@ -261,10 +279,7 @@ MatchArms: Vec<MatchArm<Expr>> = Separated<MatchArm, COMMA>;
 MatchArm: MatchArm<Expr> = {
     <pattern: Pattern> <cond: (IF <Expr>)?> FAT_RIGHT_ARROW <body: Expr> => MatchArm {
         pattern,
-        cond: match cond {
-            Some(c) => Some(Box::new(c)),
-            None => None,
-        },
+        cond: cond.map(Box::new),
         body: Box::new(body),
     }
 }
@@ -299,6 +314,7 @@ TrueExpr: Expr = {
     <l: @L> TRUE <r: @R> => Expr {
         node: ExprKind::Boolean(true),
         location: Location::new(l, r),
+        inferred_ty: None,
     },
 }
 
@@ -306,6 +322,7 @@ FalseExpr: Expr = {
     <l: @L> FALSE <r: @R> => Expr {
         node: ExprKind::Boolean(false),
         location: Location::new(l, r),
+        inferred_ty: None,
     },
 }
 
@@ -320,6 +337,7 @@ MemberAccessExpr: Expr = {
             member
         },
         location: Location::new(l, r),
+        inferred_ty: None,
     }
 }
 
@@ -327,6 +345,7 @@ FunCallExpr: Expr = {
     <l: @L> <target: Term> LPAREN <args: Arguments> RPAREN <r: @R> => Expr {
         node: ExprKind::FunCall{target: Box::new(target), args},
         location: Location::new(l, r),
+        inferred_ty: None,
     }
 }
 
@@ -336,6 +355,7 @@ IfExpr: Expr = {
     <l: @L> IF <cond: Expr> LBRACE <then: Expr> RBRACE ELSE LBRACE <els: Expr> RBRACE <r: @R> => Expr {
         node: ExprKind::If { cond: Box::new(cond), then: Box::new(then), els: Box::new(els) },
         location: Location::new(l, r),
+        inferred_ty: None,
     }
 }
 
@@ -343,6 +363,7 @@ IdentifierExpr: Expr = {
     <l: @L> <id: Identifier> <r: @R> => Expr {
         node: ExprKind::Identifier(id),
         location: Location::new(l, r),
+        inferred_ty: None,
     }
 }
 
@@ -350,6 +371,7 @@ Number: Expr = {
     <l: @L> <n: NUMBER> <r: @R> => Expr {
         node: ExprKind::Int(i64::from_str(n).unwrap()),
         location: Location::new(l, r),
+        inferred_ty: None,
     }
 }
 
@@ -361,13 +383,41 @@ IdentifiersMapping: Vec<(String, Expr)> = Separated<IdentifierMapping, COMMA>;
 
 Identifiers: Vec<String> = Separated<Identifier, COMMA>;
 
+Generics: Vec<WrittenType> = {
+    LBRACKET <names: WrittenTypes> RBRACKET => names,
+}
+
+TypeDeclarationGenerics: Vec<GenericDeclaration> = {
+    LBRACKET <names: Identifiers> RBRACKET => names.into_iter().map(|name| GenericDeclaration { name }).collect(),
+}
+
+TypeDeclaration: TypeDeclaration = {
+    <name: Identifier> <generics: TypeDeclarationGenerics?> => {
+        TypeDeclaration { name, generics: generics.unwrap_or(vec![]) }
+    },
+}
+
+WrittenType: WrittenType = {
+    // TODO: Generics
+    <name: Identifier> <generics: Generics?> => WrittenType::Identifier{ name, generics: generics.unwrap_or(vec![]) },
+    LPAREN <params: WrittenTypes> RPAREN FAT_RIGHT_ARROW <return_type: WrittenType> => WrittenType::Function {
+        params,
+        return_type: Box::new(return_type),
+    },
+    // TODO: Int => Int (currently causes conflict)
+}
+
+WrittenTypes: Vec<WrittenType> = Separated<WrittenType, COMMA>;
+
 StructInitializer: Expr = {
-    // TODO: This amber is here cause otherwise there is a conflict.
-    <l: @L> AMPER <name: Identifier> LBRACE <fields: IdentifiersMapping> RBRACE <r: @R> => Expr {
+    // TODO: This amper is here cause otherwise there is a conflict.
+    <l: @L> AMPER <name: Identifier> <generics: Generics?> LBRACE <fields: IdentifiersMapping> RBRACE <r: @R> => Expr {
         node: ExprKind::StructInitializer {
             name,
             fields,
+            generics: generics.unwrap_or(vec![]),
         },
         location: Location::new(l, r),
+        inferred_ty: None,
     }
 }

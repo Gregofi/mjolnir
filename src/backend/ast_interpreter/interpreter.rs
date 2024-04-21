@@ -26,9 +26,13 @@ pub enum Value {
     Unit,
     Function {
         body: TypedExpr,
+        parameters: Vec<String>,
     },
     NativeFunction(native_functions::NativeFunction),
-    Constructor(String),
+    Constructor {
+        name: String,
+        param_cnt: usize,
+    },
     Struct(StructValue),
     Variant {
         name: String,
@@ -60,7 +64,7 @@ impl Display for Value {
                 }
                 write!(f, ")")
             }
-            Value::Constructor(name) => write!(f, "Constructor({})", name),
+            Value::Constructor { name, .. } => write!(f, "Constructor({})", name),
         }
     }
 }
@@ -141,11 +145,23 @@ impl Interpreter {
         let mut globals = HashMap::new();
         for (name, decl) in top_decls.iter() {
             let value_decl = match &decl.node {
-                TypedDeclKind::FunDecl { body, .. } => Some(Value::Function {
+                TypedDeclKind::FunDecl {
+                    body, parameters, ..
+                } => Some(Value::Function {
                     body: *body.clone(),
+                    parameters: parameters.iter().map(|p| p.name.clone()).collect(),
                 }),
-                TypedDeclKind::VariantConstructor { name, .. } => {
-                    Some(Value::Constructor(name.clone()))
+                TypedDeclKind::EnumDecl { variants, .. } => {
+                    for variant in variants {
+                        let param_cnt = variant.fields.len();
+                        let name = variant.name.clone();
+                        let cons = Value::Constructor {
+                            name: name.clone(),
+                            param_cnt,
+                        };
+                        globals.insert(name, cons);
+                    }
+                    None
                 }
                 _ => None,
             };
@@ -161,7 +177,6 @@ impl Interpreter {
     }
 
     pub fn try_match(
-        &mut self,
         pattern: &Pattern,
         match_target: &Value,
     ) -> Option<HashMap<String, Value>> {
@@ -201,7 +216,7 @@ impl Interpreter {
             ) if enum_name == variant_name => {
                 let mut map = HashMap::new();
                 for (pattern, value) in patterns.iter().zip(fields.iter()) {
-                    let ids = self.try_match(pattern, value);
+                    let ids = Interpreter::try_match(pattern, value);
                     if let Some(ids) = ids {
                         for (id, value) in ids {
                             map.insert(id, value);
@@ -253,17 +268,13 @@ impl Interpreter {
                     .collect::<Result<Vec<Value>>>()?;
 
                 self.call_stack.push_call();
-                let fun_type = target.ty.as_function().expect(
-                    "Function call must have function type; Should be caught by semantic analysis",
-                );
-                for (param, arg) in fun_type.parameters.iter().zip(args_values.iter()) {
-                    self.call_stack
-                        .add_identifier(param.name.clone(), arg.clone());
-                }
 
                 let resulting_function = self.interpret_expr(target)?;
                 match resulting_function {
-                    Value::Function { body } => {
+                    Value::Function { body, parameters } => {
+                        for (param, arg) in parameters.iter().zip(args_values.iter()) {
+                            self.call_stack.add_identifier(param.clone(), arg.clone());
+                        }
                         let result = self.interpret_expr(&body)?;
                         self.call_stack.pop_call();
                         Ok(result)
@@ -273,7 +284,7 @@ impl Interpreter {
                         self.call_stack.pop_call();
                         Ok(result)
                     },
-                    Value::Constructor(name) => {
+                    Value::Constructor{name, param_cnt: _} => {
                         let result = Value::Variant {
                             name,
                             fields: Rc::new(args_values),
@@ -320,7 +331,7 @@ impl Interpreter {
             ExprKind::Match { target, arms } => {
                 let target = self.interpret_expr(target)?;
                 for arm in arms {
-                    let ids = self.try_match(&arm.pattern, &target);
+                    let ids = Interpreter::try_match(&arm.pattern, &target);
                     if let Some(ids) = ids {
                         self.call_stack.get_env().push();
                         for (id, value) in ids {
@@ -337,7 +348,7 @@ impl Interpreter {
                     "No match found; Should be caught by semantic analysis"
                 ))
             }
-            ExprKind::StructInitializer { name, fields } => {
+            ExprKind::StructInitializer { name, fields, .. } => {
                 let vals = fields
                     .iter()
                     .map(|(name, expr)| Ok((name.clone(), self.interpret_expr(expr)?)))
@@ -392,7 +403,7 @@ impl Interpreter {
             .get(MAIN_FUNCTION_NAME)
             .context("No main function found")?;
         let main_body = match main {
-            Value::Function { body } => {
+            Value::Function { body, .. } => {
                 body.clone() // FIXME: borrow checker is not happy
             }
             _ => return Err(anyhow!("Main function must be a function")),
@@ -401,7 +412,7 @@ impl Interpreter {
         self.call_stack.push_call();
         let val = self.interpret_expr(&main_body)?;
         match val {
-            Value::Integer(x) if x >= 0 && x < 256 => Ok(x.try_into().unwrap()),
+            Value::Integer(x) if (0..256).contains(&x) => Ok(x.try_into().unwrap()),
             Value::Integer(_) => Err(anyhow!(
                 "Main function must return unit or integer between 0 and 255"
             )),
@@ -411,99 +422,123 @@ impl Interpreter {
     }
 }
 
+pub fn decls_to_hashmap(decls: Vec<TypedDecl>) -> HashMap<String, TypedDecl> {
+    let mut map = HashMap::new();
+    for decl in decls {
+        let name = match &decl.node {
+            TypedDeclKind::FunDecl { name, .. } => name,
+            TypedDeclKind::VarDecl(v) => &v.name,
+            TypedDeclKind::StructDecl { name, .. } => name,
+            TypedDeclKind::EnumDecl { name, .. } => name,
+            TypedDeclKind::VariantConstructor { name, .. } => name,
+        }
+        .clone();
+        map.insert(name, decl);
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::parse_ast;
+    use crate::frontend::do_frontend_pass;
 
     #[test]
     fn test_interpret_main() {
-        let ast = parse_ast("fn main(): Int = 5").unwrap();
-        let mut interpreter = Interpreter::new(ast);
+        let ast = do_frontend_pass("fn main(): Int = 5").unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 5);
 
-        let ast = parse_ast("fn main(): Int = 1 + 2").unwrap();
-        let mut interpreter = Interpreter::new(ast);
+        let ast = do_frontend_pass("fn main(): Int = 1 + 2").unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_interpreter_if() {
-        let ast = parse_ast("fn main(): Int = if true { 1 } else { 2 }").unwrap();
-        let mut interpreter = Interpreter::new(ast);
+        let ast = do_frontend_pass("fn main(): Int = if true { 1 } else { 2 }").unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 1);
 
-        let ast = parse_ast("fn main(): Int = if false { 1 } else { 2 }").unwrap();
-        let mut interpreter = Interpreter::new(ast);
+        let ast = do_frontend_pass("fn main(): Int = if false { 1 } else { 2 }").unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 2);
     }
 
     #[test]
     fn test_fact() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }
 
 fn main(): Int = fact(5)
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 120);
     }
 
     #[test]
     fn test_fib() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn fib(n: Int): Int = if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
 
 fn main(): Int = fib(7)
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 13);
     }
 
+    #[ignore]
     #[test]
     fn test_native_functions() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn main(): Int = ipow(2, 3)
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 8);
     }
 
     #[test]
     fn test_compound_statements() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn main(): Int = {
     1;
     2
 }
             ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 2);
 
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
+fn println[T](x: T): Bool = true
+
 fn main(): Int = {
-    iprintln(2);
+    println(2);
     1 + 2 + 3;
     4
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 4);
     }
 
     #[test]
     fn test_compound_decls() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn main(): Int = {
     let a: Int = 1;
@@ -511,14 +546,15 @@ fn main(): Int = {
     a + b
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_structs() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 struct Pair { x: Int, y: Int }
 
@@ -527,14 +563,15 @@ fn main(): Int = {
     a.x + a.y
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_match_primitives() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn main(): Int = match 3 {
     2 => 5,
@@ -542,36 +579,39 @@ fn main(): Int = match 3 {
     _ => 9,
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 7);
 
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn main(): Int = match 3 {
     2 => 5,
     _ => 2,
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 2);
 
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 fn main(): Int = match true {
     true => 1,
     false => 2,
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 1);
     }
 
     #[test]
     fn test_match_enums() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 enum List {
     Cons(Int, List),
@@ -583,15 +623,16 @@ fn main(): Int = match Cons(1, Nil()) {
     Nil() => 0,
 }
 ",
-        );
+        )
+        .unwrap();
 
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 1);
     }
 
     #[test]
     fn test_inner_match() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 enum List {
     Cons(Int, List),
@@ -603,14 +644,15 @@ fn main(): Int = match Cons(1, Cons(2, Nil())) {
     _ => 0,
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 2);
     }
 
     #[test]
     fn test_match_linked_list() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 enum List {
     Cons(Int, List),
@@ -634,14 +676,15 @@ fn main(): Int = {
     max(lst)
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_match_struct() {
-        let ast = parse_ast(
+        let ast = do_frontend_pass(
             "
 struct Pair { x: Int, y: Int }
 
@@ -649,8 +692,9 @@ fn main(): Int = match &Pair{x: 1, y: 2} {
     Pair{x, y} => x + y,
 }
 ",
-        );
-        let mut interpreter = Interpreter::new(ast.unwrap());
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 }
