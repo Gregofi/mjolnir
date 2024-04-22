@@ -1,6 +1,7 @@
 /// TODO: Check if the Rcs are truly necessary.
 use super::utils::{GenericDeclaration, IdEnv, StronglyTypedIdentifier, WrittenType};
 use crate::ast::{Decl, DeclKind, Expr, ExprKind, Operator, Pattern, Stmt, StmtKind, VarDecl};
+use crate::backend::ast_interpreter::native_functions::get_native_functions;
 use log::debug;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -55,8 +56,8 @@ pub enum Type {
 /// function call.
 #[derive(Debug, Clone)]
 pub struct TypeScheme {
-    generics: Vec<GenericDeclaration>,
-    ty: Rc<Type>,
+    pub generics: Vec<GenericDeclaration>,
+    pub ty: Rc<Type>,
 }
 
 impl<T: std::fmt::Display> Display for Constructor<T> {
@@ -127,11 +128,11 @@ impl Constructor<Type> {
 }
 
 impl Type {
-    fn into_rc(self) -> Rc<Type> {
+    pub fn into_rc(self) -> Rc<Type> {
         Rc::new(self)
     }
 
-    fn create_constant(name: String) -> Rc<Type> {
+    pub fn create_constant(name: String) -> Rc<Type> {
         Type::Constructor(Constructor {
             name,
             type_vec: vec![],
@@ -140,7 +141,7 @@ impl Type {
     }
 
     /// Converts this type into TypeScheme without any generics
-    fn into_scheme(self) -> TypeScheme {
+    pub fn into_scheme(self) -> TypeScheme {
         TypeScheme {
             generics: vec![],
             ty: self.into_rc(),
@@ -148,7 +149,7 @@ impl Type {
     }
 
     /// Function is represented as a constructor Function<ReturnType, ...Args>
-    fn create_function(mut parameters: Vec<Rc<Type>>, return_type: Rc<Type>) -> Type {
+    pub fn create_function(mut parameters: Vec<Rc<Type>>, return_type: Rc<Type>) -> Type {
         parameters.insert(0, return_type);
         Type::Constructor(Constructor {
             name: "Function".to_string(),
@@ -160,7 +161,10 @@ impl Type {
     /// If the type is a constructor which name matches the name in map,
     /// the replacement cannot be performed and error will be returned.
     /// (T<Q>, { T -> CustomType }) => CustomType<Q> will result in an error.
-    fn fill_types(&self, map: &HashMap<String, Rc<Type>>) -> Result<Rc<Type>, TypeInferenceError> {
+    pub fn fill_types(
+        &self,
+        map: &HashMap<String, Rc<Type>>,
+    ) -> Result<Rc<Type>, TypeInferenceError> {
         match self {
             Type::TypeVar(_) => Ok(self.clone().into_rc()),
             Type::Constructor(cons) => cons.fill_types(map),
@@ -807,12 +811,15 @@ pub fn type_inference(mut decls: Vec<Decl>) -> Result<Vec<Decl>, TypeInferenceEr
     // Previsit decls, collect necessary info about types.
     let mut type_ids = HashMap::new();
     for decl in &decls {
-        if let DeclKind::StructDecl { name, fields, generics } = &decl.node {
+        if let DeclKind::StructDecl {
+            name,
+            fields,
+            generics,
+        } = &decl.node
+        {
             let fields: Vec<_> = fields
                 .iter()
-                .map(|StronglyTypedIdentifier { name, ty }| {
-                    (name.clone(), ty.clone().into_type())
-                })
+                .map(|StronglyTypedIdentifier { name, ty }| (name.clone(), ty.clone().into_type()))
                 .collect();
 
             type_ids.insert(
@@ -835,6 +842,13 @@ pub fn type_inference(mut decls: Vec<Decl>) -> Result<Vec<Decl>, TypeInferenceEr
         table.ids.push();
         table
     });
+
+    for native_fun in get_native_functions() {
+        symbol_table
+            .borrow_mut()
+            .ids
+            .insert(native_fun.name.clone(), native_fun.ty.clone());
+    }
 
     // Do the actual type inference
     for decl in decls.iter_mut() {
@@ -1141,5 +1155,23 @@ fn main(): Int = {
             .to_string()
             .contains("let p: Point = Point { x: 1, y: 2 };"));
         assert!(decls[1].to_string().contains("let sum: Int"));
+    }
+
+    #[test]
+    fn test_native_function() {
+        init();
+        let ast = parse_ast(
+            "
+fn main(): Int = {
+    let x = pow(2, 3);
+    assert(true);
+    0
+}
+",
+        );
+
+        let decls = type_inference(ast.unwrap()).unwrap();
+        assert!(decls.len() == 1);
+        assert!(decls[0].to_string().contains("let x: Int"));
     }
 }

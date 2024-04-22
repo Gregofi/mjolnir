@@ -176,10 +176,7 @@ impl Interpreter {
         }
     }
 
-    pub fn try_match(
-        pattern: &Pattern,
-        match_target: &Value,
-    ) -> Option<HashMap<String, Value>> {
+    pub fn try_match(pattern: &Pattern, match_target: &Value) -> Option<HashMap<String, Value>> {
         match (pattern, match_target) {
             (Pattern::Wildcard, _) => Some(HashMap::new()),
             (Pattern::Int(pval), Value::Integer(vval)) if pval == vval => Some(HashMap::new()),
@@ -493,12 +490,11 @@ fn main(): Int = fib(7)
         assert_eq!(interpreter.interpret().unwrap(), 13);
     }
 
-    #[ignore]
     #[test]
     fn test_native_functions() {
         let ast = do_frontend_pass(
             "
-fn main(): Int = ipow(2, 3)
+fn main(): Int = pow(2, 3)
 ",
         )
         .unwrap();

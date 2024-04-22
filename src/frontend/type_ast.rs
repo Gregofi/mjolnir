@@ -50,9 +50,7 @@ impl WrittenType {
                     generics,
                 })
             }
-            WrittenType::Function {
-                ..
-            } => todo!(),
+            WrittenType::Function { .. } => todo!(),
         }
     }
 }

@@ -614,9 +614,26 @@ impl Decl {
         f_stmt: &impl Fn(Stmt) -> Result<Stmt, E>,
         f_expr: &impl Fn(Expr) -> Result<Expr, E>,
     ) -> Result<Self, E> {
-        if let DeclKind::FunDecl { name, generics, parameters, inferred_parameters, return_type, inferred_return_type, body } = self.node {
+        if let DeclKind::FunDecl {
+            name,
+            generics,
+            parameters,
+            inferred_parameters,
+            return_type,
+            inferred_return_type,
+            body,
+        } = self.node
+        {
             let body = Box::new(body.fold(f_decl, f_stmt, f_expr)?);
-            self.node = DeclKind::FunDecl { name, generics, parameters, inferred_parameters, return_type, inferred_return_type, body };
+            self.node = DeclKind::FunDecl {
+                name,
+                generics,
+                parameters,
+                inferred_parameters,
+                return_type,
+                inferred_return_type,
+                body,
+            };
         }
         f_decl(self)
     }
