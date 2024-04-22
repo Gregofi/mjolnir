@@ -12,8 +12,8 @@ pub mod utils;
 #[allow(dead_code)]
 pub fn do_frontend_pass(program: &str) -> Result<Vec<TypedDecl>> {
     let ast = parser::parse_ast(program)?;
-    let inferred = type_inference::type_inference(ast)
-        .map_err(|e| anyhow!("Type inference failed: {}", e))?;
+    let inferred =
+        type_inference::type_inference(ast).map_err(|e| anyhow!("Type inference failed: {}", e))?;
     // Will be used later.
     // let types = type_ast::collect_decls(&inferred);
     let typed = type_ast::type_ast(inferred);
