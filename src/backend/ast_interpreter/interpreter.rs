@@ -20,8 +20,6 @@ pub struct StructValue {
 #[derive(Clone)]
 pub enum Value {
     Integer(i64),
-    Float(f64),
-    String(Rc<String>),
     Bool(bool),
     Unit,
     Function {
@@ -44,8 +42,6 @@ impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Value::Integer(i) => write!(f, "{}", i),
-            Value::Float(float) => write!(f, "{}", float),
-            Value::String(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Unit => write!(f, "()"),
             Value::Function { .. } => write!(f, "Function"),
@@ -181,9 +177,6 @@ impl Interpreter {
             (Pattern::Wildcard, _) => Some(HashMap::new()),
             (Pattern::Int(pval), Value::Integer(vval)) if pval == vval => Some(HashMap::new()),
             (Pattern::Boolean(pval), Value::Bool(vval)) if pval == vval => Some(HashMap::new()),
-            (Pattern::String(pval), Value::String(vval)) if pval == vval.as_ref() => {
-                Some(HashMap::new())
-            }
             (
                 Pattern::Struct {
                     name: pname,
