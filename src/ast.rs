@@ -114,6 +114,7 @@ pub enum ExprKind<St, Ex> {
     Unit,
     Int(i64),
     Boolean(bool),
+    Char(char),
     Identifier(String),
     Compound(Vec<St>, Box<Ex>),
     FunCall {
@@ -262,6 +263,7 @@ where
             ExprKind::Unit => write!(f, "()"),
             ExprKind::Int(x) => write!(f, "{}", x),
             ExprKind::Boolean(x) => write!(f, "{}", x),
+            ExprKind::Char(x) => write!(f, "{}", x),
             ExprKind::Identifier(x) => write!(f, "{}", x),
             ExprKind::Compound(stmts, expr) => {
                 write!(f, "{{ ")?;

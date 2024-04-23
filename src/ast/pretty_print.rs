@@ -123,6 +123,7 @@ where
             ExprKind::Unit => write!(f, "()"),
             ExprKind::Int(v) => write!(f, "{}", v),
             ExprKind::Boolean(v) => write!(f, "{}", v),
+            ExprKind::Char(v) => write!(f, "{}", v),
             ExprKind::Identifier(i) => write!(f, "{}", i),
             ExprKind::Compound(stmts, expr) => {
                 if stmts.is_empty() {

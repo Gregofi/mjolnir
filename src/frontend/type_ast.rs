@@ -257,6 +257,7 @@ impl Expr {
             ExprKind::Int(v) => ExprKind::Int(v),
             ExprKind::Boolean(v) => ExprKind::Boolean(v),
             ExprKind::Identifier(v) => ExprKind::Identifier(v),
+            ExprKind::Char(v) => ExprKind::Char(v),
         };
 
         Ok(TypedExpr {

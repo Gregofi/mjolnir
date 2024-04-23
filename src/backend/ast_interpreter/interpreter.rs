@@ -21,6 +21,7 @@ pub struct StructValue {
 pub enum Value {
     Integer(i64),
     Bool(bool),
+    Char(char),
     Unit,
     Function {
         body: TypedExpr,
@@ -43,6 +44,7 @@ impl Display for Value {
         match self {
             Value::Integer(i) => write!(f, "{}", i),
             Value::Bool(b) => write!(f, "{}", b),
+            Value::Char(c) => write!(f, "{}", c),
             Value::Unit => write!(f, "()"),
             Value::Function { .. } => write!(f, "Function"),
             Value::NativeFunction(_) => write!(f, "NativeFunction"),
@@ -231,6 +233,7 @@ impl Interpreter {
             ExprKind::Unit => Ok(Value::Unit),
             ExprKind::Int(int) => Ok(Value::Integer(*int)),
             ExprKind::Boolean(bool) => Ok(Value::Bool(*bool)),
+            ExprKind::Char(c) => Ok(Value::Char(*c)),
             ExprKind::Identifier(id) => {
                 let mut value = self.call_stack.get_identifier(id);
                 if value.is_none() {

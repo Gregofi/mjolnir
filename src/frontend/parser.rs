@@ -226,4 +226,14 @@ fn main(f: (Int) => (Int) => (Int) => Int) = f(1)
         )
         .is_ok());
     }
+
+    #[test]
+    fn test_chars() {
+        assert!(parse_ast(
+            "
+fn main() = 'a'
+"
+        )
+        .is_ok());
+    }
 }

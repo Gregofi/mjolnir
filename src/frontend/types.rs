@@ -25,6 +25,7 @@ pub enum BuiltInType {
     Int,
     String,
     Bool,
+    Char,
     Unit,
 }
 
@@ -34,6 +35,7 @@ impl Display for BuiltInType {
             BuiltInType::Int => "Int",
             BuiltInType::String => "String",
             BuiltInType::Bool => "Bool",
+            BuiltInType::Char => "Char",
             BuiltInType::Unit => "Unit",
         };
         f.write_str(as_str)
@@ -144,6 +146,10 @@ impl TypeKind {
 
     pub fn get_unit() -> Rc<TypeKind> {
         TypeKind::BuiltIn(BuiltInType::Unit).into()
+    }
+
+    pub fn get_char() -> Rc<TypeKind> {
+        TypeKind::BuiltIn(BuiltInType::Char).into()
     }
 
     pub fn as_function(&self) -> Option<&FunctionType> {
