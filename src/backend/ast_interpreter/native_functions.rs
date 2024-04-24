@@ -106,11 +106,7 @@ fn native_readln() -> NativeFunction {
         },
         TypeScheme {
             generics: vec![],
-            ty: Type::create_function(
-                vec![],
-                Type::create_list("Char".to_string()),
-            )
-            .into_rc(),
+            ty: Type::create_function(vec![], Type::create_list("Char".to_string())).into_rc(),
         },
     )
 }
@@ -146,8 +142,10 @@ fn native_pow() -> NativeFunction {
         TypeScheme {
             generics: vec![],
             ty: Type::create_function(
-                vec![Type::create_constant("Int".to_string()),
-                     Type::create_constant("Int".to_string())],
+                vec![
+                    Type::create_constant("Int".to_string()),
+                    Type::create_constant("Int".to_string()),
+                ],
                 Type::create_constant("Int".to_string()),
             )
             .into_rc(),
@@ -156,5 +154,10 @@ fn native_pow() -> NativeFunction {
 }
 
 pub fn get_native_functions() -> Vec<NativeFunction> {
-    vec![native_assert(), native_pow(), native_putchar(), native_readln()]
+    vec![
+        native_assert(),
+        native_pow(),
+        native_putchar(),
+        native_readln(),
+    ]
 }

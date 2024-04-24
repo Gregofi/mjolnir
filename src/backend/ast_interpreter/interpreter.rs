@@ -732,7 +732,8 @@ fn main(): Int = match 3 {
     _ => 2,
 }
 ",
-        ).unwrap();
+        )
+        .unwrap();
         let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 1);
 
@@ -743,7 +744,8 @@ fn main(): Int = match 3 {
     _ => 2,
 }
 ",
-        ).unwrap();
+        )
+        .unwrap();
         let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 2);
     }
