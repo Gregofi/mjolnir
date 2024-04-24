@@ -331,6 +331,18 @@ impl Interpreter {
                             self.call_stack.add_identifier(id, value);
                         }
 
+                        if let Some(cond) = arm.cond.as_ref() {
+                            let cond_val = self.interpret_expr(cond)?;
+                            if let Value::Bool(x) = cond_val {
+                                if !x {
+                                    self.call_stack.get_env().pop();
+                                    continue;
+                                }
+                            } else {
+                                return Err(anyhow!("Condition in match must be boolean"));
+                            }
+                        }
+
                         let result = self.interpret_expr(&arm.body);
 
                         self.call_stack.get_env().pop();
@@ -688,5 +700,30 @@ fn main(): Int = match &Pair{x: 1, y: 2} {
         .unwrap();
         let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_match_cond() {
+        let ast = do_frontend_pass(
+            "
+fn main(): Int = match 3 {
+    x if x > 2 => 1,
+    _ => 2,
+}
+",
+        ).unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        assert_eq!(interpreter.interpret().unwrap(), 1);
+
+        let ast = do_frontend_pass(
+            "
+fn main(): Int = match 3 {
+    x if x < 2 => 1,
+    _ => 2,
+}
+",
+        ).unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        assert_eq!(interpreter.interpret().unwrap(), 2);
     }
 }
