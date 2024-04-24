@@ -88,7 +88,7 @@ impl Display for Type {
 }
 
 impl TypeScheme {
-    fn create_function(generics: Vec<GenericDeclaration>, ty: Rc<Type>) -> Self {
+    pub fn create_function(generics: Vec<GenericDeclaration>, ty: Rc<Type>) -> Self {
         Self { generics, ty }
     }
 

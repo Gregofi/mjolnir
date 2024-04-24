@@ -14,12 +14,30 @@ fn find[T](lst: List[T], n: T): Bool = match lst {
     Nil => false,
 }
 
+fn head[T](lst: List[T]): Option[T] = match lst {
+    Cons(head, _) => Some(head),
+    Nil => None(),
+}
+
+fn println(lst: List[Char]) = match lst {
+    Cons(head, tail) => {
+        putchar(head);
+        println(tail)
+    },
+    Nil => {
+        putchar('\n')
+    }
+}
+
 fn main(): Int = {
     let lst = Cons(0, Cons(1, Cons(2, Cons(3, Nil()))));
-    let exists = find(lst, 2);
-    if exists {
-        0
-    } else {
-        1
-    }
+    assert(find(lst, 2));
+    assert(find(lst, 5) == false);
+    assert(match head(lst) {
+        Some(x) if x == 0 => true,
+        _ => false,
+    });
+    let y = readln();
+    println(y);
+    0
 }
