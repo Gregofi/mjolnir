@@ -55,6 +55,8 @@ match {
     r"[_A-Za-z][_A-Za-z0-9]*" => IDENTIFIER,
     r"[0-9]+" => NUMBER,
     r#""([^\\"]|\\[~ntr\\"])*""# => STRING_LITERAL,
+    // TODO: Char '\'' doesn't work
+    r"'([^'\\]|\\[~ntr\\'])'" => CHAR,
 }
 
 pub TopLevelDecls: Vec<Decl> = {
@@ -232,6 +234,7 @@ Term: Expr = {
     Number => <>,
     BooleanLit => <>,
     IdentifierExpr => <>,
+    CharExpr => <>,
     FunCallExpr => <>,
     MemberAccessExpr => <>,
     IfExpr => <>,
@@ -370,6 +373,21 @@ IdentifierExpr: Expr = {
 Number: Expr = {
     <l: @L> <n: NUMBER> <r: @R> => Expr {
         node: ExprKind::Int(i64::from_str(n).unwrap()),
+        location: Location::new(l, r),
+        inferred_ty: None,
+    }
+}
+
+CharExpr: Expr = {
+    <l: @L> <c: CHAR> <r: @R> => Expr {
+        node: ExprKind::Char({
+            match c {
+                "'\\n'" => '\n',
+                "'\\t'" => '\t',
+                "'\\r'" => '\r',
+                _ => c.chars().nth(1).unwrap(),
+            }
+        }),
         location: Location::new(l, r),
         inferred_ty: None,
     }

@@ -88,7 +88,7 @@ impl Display for Type {
 }
 
 impl TypeScheme {
-    fn create_function(generics: Vec<GenericDeclaration>, ty: Rc<Type>) -> Self {
+    pub fn create_function(generics: Vec<GenericDeclaration>, ty: Rc<Type>) -> Self {
         Self { generics, ty }
     }
 
@@ -393,6 +393,7 @@ impl SymbolTable {
             ExprKind::Unit => Ok(Type::create_constant("Unit".to_string())),
             ExprKind::Int(_) => Ok(Type::create_constant("Int".to_string())),
             ExprKind::Boolean(_) => Ok(Type::create_constant("Bool".to_string())),
+            ExprKind::Char(_) => Ok(Type::create_constant("Char".to_string())),
             ExprKind::Identifier(id) => {
                 let ty = match self.ids.get(id) {
                     Some(ty) => ty.instantiate()?,

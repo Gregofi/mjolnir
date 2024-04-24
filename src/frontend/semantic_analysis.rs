@@ -54,6 +54,7 @@ impl SymbolTable {
         types.insert("Int".to_string(), Type::get_int());
         types.insert("Bool".to_string(), Type::get_bool());
         types.insert("Unit".to_string(), Type::get_unit());
+        types.insert("Char".to_string(), Type::get_char());
         types.insert(
             "String".to_string(),
             Type::BuiltIn(BuiltInType::String).into(),

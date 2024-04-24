@@ -20,9 +20,8 @@ pub struct StructValue {
 #[derive(Clone)]
 pub enum Value {
     Integer(i64),
-    Float(f64),
-    String(Rc<String>),
     Bool(bool),
+    Char(char),
     Unit,
     Function {
         body: TypedExpr,
@@ -44,9 +43,8 @@ impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Value::Integer(i) => write!(f, "{}", i),
-            Value::Float(float) => write!(f, "{}", float),
-            Value::String(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
+            Value::Char(c) => write!(f, "{}", c),
             Value::Unit => write!(f, "()"),
             Value::Function { .. } => write!(f, "Function"),
             Value::NativeFunction(_) => write!(f, "NativeFunction"),
@@ -181,9 +179,6 @@ impl Interpreter {
             (Pattern::Wildcard, _) => Some(HashMap::new()),
             (Pattern::Int(pval), Value::Integer(vval)) if pval == vval => Some(HashMap::new()),
             (Pattern::Boolean(pval), Value::Bool(vval)) if pval == vval => Some(HashMap::new()),
-            (Pattern::String(pval), Value::String(vval)) if pval == vval.as_ref() => {
-                Some(HashMap::new())
-            }
             (
                 Pattern::Struct {
                     name: pname,
@@ -238,6 +233,7 @@ impl Interpreter {
             ExprKind::Unit => Ok(Value::Unit),
             ExprKind::Int(int) => Ok(Value::Integer(*int)),
             ExprKind::Boolean(bool) => Ok(Value::Bool(*bool)),
+            ExprKind::Char(c) => Ok(Value::Char(*c)),
             ExprKind::Identifier(id) => {
                 let mut value = self.call_stack.get_identifier(id);
                 if value.is_none() {
@@ -304,6 +300,27 @@ impl Interpreter {
                 let lhs_val = self.interpret_expr(lhs)?;
                 let rhs_val = self.interpret_expr(rhs)?;
                 match (lhs_val, rhs_val) {
+                    (Value::Bool(lhs), Value::Bool(rhs)) => {
+                        let res = match op {
+                            Operator::Equal => Value::Bool(lhs == rhs),
+                            Operator::Neq => Value::Bool(lhs != rhs),
+                            _ => panic!("Invalid operator for boolean values"),
+                        };
+                        Ok(res)
+                    }
+                    (Value::Char(lhs), Value::Char(rhs)) => {
+                        let res = match op {
+                            Operator::Equal => Value::Bool(lhs == rhs),
+                            Operator::Neq => Value::Bool(lhs != rhs),
+                            Operator::Less => Value::Bool(lhs < rhs),
+                            Operator::Greater => Value::Bool(lhs > rhs),
+                            Operator::LessEqual => Value::Bool(lhs <= rhs),
+                            Operator::GreaterEqual => Value::Bool(lhs >= rhs),
+                            Operator::Sub => Value::Integer(lhs as i64 - rhs as i64),
+                            _ => panic!("Invalid operator for char values"),
+                        };
+                        Ok(res)
+                    }
                     (Value::Integer(lhs), Value::Integer(rhs)) => {
                         let res = match op {
                             Operator::Add => Value::Integer(lhs + rhs),
@@ -333,6 +350,18 @@ impl Interpreter {
                         self.call_stack.get_env().push();
                         for (id, value) in ids {
                             self.call_stack.add_identifier(id, value);
+                        }
+
+                        if let Some(cond) = arm.cond.as_ref() {
+                            let cond_val = self.interpret_expr(cond)?;
+                            if let Value::Bool(x) = cond_val {
+                                if !x {
+                                    self.call_stack.get_env().pop();
+                                    continue;
+                                }
+                            } else {
+                                return Err(anyhow!("Condition in match must be boolean"));
+                            }
                         }
 
                         let result = self.interpret_expr(&arm.body);
@@ -692,5 +721,32 @@ fn main(): Int = match &Pair{x: 1, y: 2} {
         .unwrap();
         let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
         assert_eq!(interpreter.interpret().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_match_cond() {
+        let ast = do_frontend_pass(
+            "
+fn main(): Int = match 3 {
+    x if x > 2 => 1,
+    _ => 2,
+}
+",
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        assert_eq!(interpreter.interpret().unwrap(), 1);
+
+        let ast = do_frontend_pass(
+            "
+fn main(): Int = match 3 {
+    x if x < 2 => 1,
+    _ => 2,
+}
+",
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        assert_eq!(interpreter.interpret().unwrap(), 2);
     }
 }
