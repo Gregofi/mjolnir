@@ -55,7 +55,8 @@ match {
     r"[_A-Za-z][_A-Za-z0-9]*" => IDENTIFIER,
     r"[0-9]+" => NUMBER,
     r#""([^\\"]|\\[~ntr\\"])*""# => STRING_LITERAL,
-    r"'.'" => CHAR,
+    // TODO: Char '\'' doesn't work
+    r"'([^'\\]|\\[~ntr\\'])'" => CHAR,
 }
 
 pub TopLevelDecls: Vec<Decl> = {
@@ -379,7 +380,14 @@ Number: Expr = {
 
 CharExpr: Expr = {
     <l: @L> <c: CHAR> <r: @R> => Expr {
-        node: ExprKind::Char(c.chars().nth(1).unwrap()),
+        node: ExprKind::Char({
+            match c {
+                "'\\n'" => '\n',
+                "'\\t'" => '\t',
+                "'\\r'" => '\r',
+                _ => c.chars().nth(1).unwrap(),
+            }
+        }),
         location: Location::new(l, r),
         inferred_ty: None,
     }

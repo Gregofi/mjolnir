@@ -231,7 +231,8 @@ fn main(f: (Int) => (Int) => (Int) => Int) = f(1)
     fn test_chars() {
         assert!(parse_ast(
             "
-fn main() = 'a'
+fn bar() = 'a'
+fn foo() = '\n'
 "
         )
         .is_ok());
