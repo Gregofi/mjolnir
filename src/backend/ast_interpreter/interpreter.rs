@@ -300,6 +300,27 @@ impl Interpreter {
                 let lhs_val = self.interpret_expr(lhs)?;
                 let rhs_val = self.interpret_expr(rhs)?;
                 match (lhs_val, rhs_val) {
+                    (Value::Bool(lhs), Value::Bool(rhs)) => {
+                        let res = match op {
+                            Operator::Equal => Value::Bool(lhs == rhs),
+                            Operator::Neq => Value::Bool(lhs != rhs),
+                            _ => panic!("Invalid operator for boolean values"),
+                        };
+                        Ok(res)
+                    }
+                    (Value::Char(lhs), Value::Char(rhs)) => {
+                        let res = match op {
+                            Operator::Equal => Value::Bool(lhs == rhs),
+                            Operator::Neq => Value::Bool(lhs != rhs),
+                            Operator::Less => Value::Bool(lhs < rhs),
+                            Operator::Greater => Value::Bool(lhs > rhs),
+                            Operator::LessEqual => Value::Bool(lhs <= rhs),
+                            Operator::GreaterEqual => Value::Bool(lhs >= rhs),
+                            Operator::Sub => Value::Integer(lhs as i64 - rhs as i64),
+                            _ => panic!("Invalid operator for char values"),
+                        };
+                        Ok(res)
+                    }
                     (Value::Integer(lhs), Value::Integer(rhs)) => {
                         let res = match op {
                             Operator::Add => Value::Integer(lhs + rhs),
