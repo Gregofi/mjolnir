@@ -1,16 +1,15 @@
 use clap::{Arg, Command};
-use frontend::parser::parse_ast;
 
 mod ast;
 mod backend;
+mod constants;
 mod frontend;
 mod traits;
 
 use backend::ast_interpreter::interpreter::Interpreter;
-use frontend::do_frontend_pass;
-use frontend::type_inference::type_inference;
+use frontend::parse_and_check_files;
 
-use backend::ast_interpreter::interpreter::decls_to_hashmap;
+use crate::backend::ast_interpreter::interpreter::NamedModule;
 
 fn main() {
     env_logger::init();
@@ -31,18 +30,22 @@ fn main() {
         .get_matches();
     if let Some(matches) = matches.subcommand_matches("type-inference") {
         let file = matches.get_one::<String>("file").unwrap();
-        let contents = std::fs::read_to_string(file).expect("Error reading file");
-        let ast = parse_ast(&contents).unwrap();
-        let ast = type_inference(ast).expect("Type inference failed");
-        for decl in ast {
-            println!("{}", decl.display_pretty());
+        let modules = parse_and_check_files(file).expect("Compilation failed");
+        for (name, module) in modules {
+            println!("Module: {}", name);
+            for decl in module.decls {
+                println!("{}", decl.display_pretty());
+            }
         }
     } else if let Some(matches) = matches.subcommand_matches("interpret") {
         let file = matches.get_one::<String>("file").unwrap();
-        let contents = std::fs::read_to_string(file).expect("Error reading file");
-        let ast = do_frontend_pass(&contents).unwrap();
-
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let modules = parse_and_check_files(file).expect("Compilation failed");
+        let mut interpreter = Interpreter::new(
+            modules
+                .into_iter()
+                .map(|(name, module)| (name, NamedModule::from(module)))
+                .collect(),
+        );
         match interpreter.interpret() {
             Ok(e) => {
                 println!("Program exited with code {}", e);

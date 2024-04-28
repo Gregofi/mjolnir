@@ -408,6 +408,26 @@ pub struct EnumVariant {
 }
 
 #[derive(Clone, Debug)]
+pub struct Import {
+    pub path: String,
+    pub imported_ids: Vec<String>,
+}
+
+/// Represents single module, a single module maps to a single file.
+/// This means that module is uniquely identified by its path.
+#[derive(Clone, Debug)]
+pub struct Module {
+    pub decls: Vec<Decl>,
+    pub imports: Vec<Import>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedModule {
+    pub decls: Vec<TypedDecl>,
+    pub imports: Vec<Import>,
+}
+
+#[derive(Clone, Debug)]
 pub enum DeclKind {
     FunDecl {
         name: String,

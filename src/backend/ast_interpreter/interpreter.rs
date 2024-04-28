@@ -3,11 +3,13 @@ use std::fmt::{self, Display, Formatter};
 use std::{collections::HashMap, rc::Rc};
 
 use crate::ast::{
-    ExprKind, Operator, Pattern, TypedDecl, TypedDeclKind, TypedExpr, TypedStmt, TypedStmtKind,
+    ExprKind, Import, Operator, Pattern, TypedDecl, TypedDeclKind, TypedExpr, TypedModule,
+    TypedStmt, TypedStmtKind,
 };
 
 use super::native_functions;
 use super::native_functions::NativeFunction;
+use crate::constants::STD_NATIVE_MODULE;
 
 const MAIN_FUNCTION_NAME: &str = "main";
 
@@ -26,6 +28,8 @@ pub enum Value {
     Function {
         body: TypedExpr,
         parameters: Vec<String>,
+        /// Which module the function is defined in
+        module: String,
     },
     NativeFunction(native_functions::NativeFunction),
     Constructor {
@@ -68,7 +72,11 @@ impl Display for Value {
 }
 
 struct CallEnvironment {
+    /// Each item in the vector is a new layer of scope
     env: Vec<HashMap<String, Value>>,
+    /// The current module that is being interpreted
+    /// To know from where to take globals.
+    current_module: String,
 }
 
 impl CallEnvironment {
@@ -93,6 +101,7 @@ impl CallEnvironment {
 }
 
 struct CallStack {
+    /// For each call, there is a new CallEnvironment
     stack: Vec<CallEnvironment>,
 }
 
@@ -102,9 +111,10 @@ impl CallStack {
     }
 
     /// Pushes a new call environment to the stack with one layer.
-    pub fn push_call(&mut self) {
+    pub fn push_call(&mut self, current_module: String) {
         self.stack.push(CallEnvironment {
             env: vec![HashMap::new()],
+            current_module,
         });
     }
 
@@ -131,46 +141,128 @@ impl CallStack {
             .last_mut()
             .expect("No environment, use push first!")
     }
+
+    pub fn get_current_module(&self) -> &str {
+        &self
+            .stack
+            .last()
+            .expect("No environment, use push first!")
+            .current_module
+    }
+}
+
+struct Globals {
+    /// module -> declaration name -> value
+    /// For each module, there is a HashMap from name to value.
+    /// Previously, we had (name, value) -> module, but this way
+    /// we can use &str as keys and not have to clone strings.
+    /// TODO: Check if the hashmap in hashmap is not worse.
+    globals: HashMap<String, HashMap<String, Value>>,
+}
+
+impl Globals {
+    pub fn new() -> Globals {
+        Globals {
+            globals: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, module: String, name: String, value: Value) {
+        let module = self.globals.entry(module).or_insert(HashMap::new());
+        module.insert(name, value);
+    }
+
+    pub fn get(&self, module: &str, name: &str) -> Option<&Value> {
+        self.globals.get(module).and_then(|m| m.get(name))
+    }
+
+    /// Searches through all modules for given value (declaration)
+    /// Returns vector with (Module name, value)
+    pub fn find(&self, to_find: &str) -> Vec<(String, &Value)> {
+        self.globals.iter().fold(vec![], |mut acc, (name, module)| {
+            if let Some(main) = module.get(to_find) {
+                acc.push((name.clone(), main));
+            }
+            acc
+        })
+    }
+}
+
+/// Extracts name from each declaration and returns it as hashmap.
+pub fn decls_to_hashmap(decls: Vec<TypedDecl>) -> HashMap<String, TypedDecl> {
+    let mut map = HashMap::new();
+    for decl in decls {
+        let name = match &decl.node {
+            TypedDeclKind::FunDecl { name, .. } => name,
+            TypedDeclKind::VarDecl(v) => &v.name,
+            TypedDeclKind::StructDecl { name, .. } => name,
+            TypedDeclKind::EnumDecl { name, .. } => name,
+            TypedDeclKind::VariantConstructor { name, .. } => name,
+        }
+        .clone();
+        map.insert(name, decl);
+    }
+    map
+}
+
+/// Contains HashMap from name of declaration to declaration, contrary
+/// to TypedModule which contains Vec of declarations.
+pub struct NamedModule {
+    decls: HashMap<String, TypedDecl>,
+    imports: Vec<Import>,
+}
+
+impl From<TypedModule> for NamedModule {
+    fn from(module: TypedModule) -> Self {
+        NamedModule {
+            decls: decls_to_hashmap(module.decls),
+            imports: module.imports,
+        }
+    }
 }
 
 pub struct Interpreter {
     call_stack: CallStack,
-    globals: HashMap<String, Value>,
+    globals: Globals,
+    modules: HashMap<String, NamedModule>,
 }
 
 impl Interpreter {
-    pub fn new(top_decls: HashMap<String, TypedDecl>) -> Self {
-        let mut globals = HashMap::new();
-        for (name, decl) in top_decls.iter() {
-            let value_decl = match &decl.node {
-                TypedDeclKind::FunDecl {
-                    body, parameters, ..
-                } => Some(Value::Function {
-                    body: *body.clone(),
-                    parameters: parameters.iter().map(|p| p.name.clone()).collect(),
-                }),
-                TypedDeclKind::EnumDecl { variants, .. } => {
-                    for variant in variants {
-                        let param_cnt = variant.fields.len();
-                        let name = variant.name.clone();
-                        let cons = Value::Constructor {
-                            name: name.clone(),
-                            param_cnt,
-                        };
-                        globals.insert(name, cons);
+    pub fn new(modules: HashMap<String, NamedModule>) -> Self {
+        let mut globals = Globals::new();
+        for (module_name, module) in modules.iter() {
+            for (name, decl) in module.decls.iter() {
+                let val = match &decl.node {
+                    TypedDeclKind::FunDecl {
+                        body, parameters, ..
+                    } => Some(Value::Function {
+                        body: *body.clone(),
+                        parameters: parameters.iter().map(|p| p.name.clone()).collect(),
+                        module: module_name.clone(),
+                    }),
+                    TypedDeclKind::EnumDecl { variants, .. } => {
+                        for variant in variants {
+                            let param_cnt = variant.fields.len();
+                            let name = variant.name.clone();
+                            let cons = Value::Constructor {
+                                name: name.clone(),
+                                param_cnt,
+                            };
+                            globals.add(module_name.clone(), name, cons);
+                        }
+                        None
                     }
-                    None
+                    _ => None,
+                };
+                if let Some(value) = val {
+                    globals.add(module_name.clone(), name.clone(), value);
                 }
-                _ => None,
-            };
-
-            if let Some(value) = value_decl {
-                globals.insert(name.clone(), value);
             }
         }
         Interpreter {
             call_stack: CallStack::new(),
             globals,
+            modules,
         }
     }
 
@@ -228,6 +320,11 @@ impl Interpreter {
         }
     }
 
+    pub fn get_current_module(&self) -> &NamedModule {
+        let name = self.call_stack.get_current_module();
+        self.modules.get(name).expect("Module not found")
+    }
+
     pub fn interpret_expr(&mut self, expr: &TypedExpr) -> Result<Value> {
         match &expr.node {
             ExprKind::Unit => Ok(Value::Unit),
@@ -237,7 +334,15 @@ impl Interpreter {
             ExprKind::Identifier(id) => {
                 let mut value = self.call_stack.get_identifier(id);
                 if value.is_none() {
-                    value = self.globals.get(id);
+                    value = self.globals.get(self.call_stack.get_current_module(), id);
+                }
+                if value.is_none() {
+                    value = self
+                        .get_current_module()
+                        .imports
+                        .iter()
+                        .find(|import| import.imported_ids.contains(id))
+                        .and_then(|import| self.globals.get(&import.path, id));
                 }
                 match value {
                     None => Err(anyhow!("Identifier not found: {}", id)),
@@ -260,11 +365,10 @@ impl Interpreter {
                     .map(|arg| self.interpret_expr(arg))
                     .collect::<Result<Vec<Value>>>()?;
 
-                self.call_stack.push_call();
-
                 let resulting_function = self.interpret_expr(target)?;
                 match resulting_function {
-                    Value::Function { body, parameters } => {
+                    Value::Function { module, body, parameters } => {
+                        self.call_stack.push_call(module);
                         for (param, arg) in parameters.iter().zip(args_values.iter()) {
                             self.call_stack.add_identifier(param.clone(), arg.clone());
                         }
@@ -274,7 +378,6 @@ impl Interpreter {
                     },
                     Value::NativeFunction(NativeFunction{body, ..}) => {
                         let result = body(args_values)?;
-                        self.call_stack.pop_call();
                         Ok(result)
                     },
                     Value::Constructor{name, param_cnt: _} => {
@@ -282,7 +385,6 @@ impl Interpreter {
                             name,
                             fields: Rc::new(args_values),
                         };
-                        self.call_stack.pop_call();
                         Ok(result)
                     },
                     _ => Err(anyhow!("Target of function call must be a function; Should be caught by semantic analysis")),
@@ -412,7 +514,8 @@ impl Interpreter {
 
     pub fn initialize_native_functions(&mut self) {
         for native_function in native_functions::get_native_functions() {
-            self.globals.insert(
+            self.globals.add(
+                STD_NATIVE_MODULE.to_string(),
                 native_function.name.clone(),
                 Value::NativeFunction(native_function),
             );
@@ -424,10 +527,17 @@ impl Interpreter {
      */
     pub fn interpret(&mut self) -> Result<u8> {
         self.initialize_native_functions();
-        let main = self
-            .globals
-            .get(MAIN_FUNCTION_NAME)
-            .context("No main function found")?;
+
+        let mains = self.globals.find(MAIN_FUNCTION_NAME);
+        if mains.is_empty() {
+            return Err(anyhow!("No main function found"));
+        } else if mains.len() != 1 {
+            return Err(anyhow!("Multiple declarations with the 'main' name found. There must be only one and it must be a function."));
+        }
+
+        let main_module = mains[0].0.clone(); // TODO: Ugly, but cant simply do (x, y) = mains[0], since one is ref.
+        let main = mains[0].1;
+
         let main_body = match main {
             Value::Function { body, .. } => {
                 body.clone() // FIXME: borrow checker is not happy
@@ -435,7 +545,7 @@ impl Interpreter {
             _ => return Err(anyhow!("Main function must be a function")),
         };
 
-        self.call_stack.push_call();
+        self.call_stack.push_call(main_module);
         let val = self.interpret_expr(&main_body)?;
         match val {
             Value::Integer(x) if (0..256).contains(&x) => Ok(x.try_into().unwrap()),
@@ -448,52 +558,46 @@ impl Interpreter {
     }
 }
 
-pub fn decls_to_hashmap(decls: Vec<TypedDecl>) -> HashMap<String, TypedDecl> {
-    let mut map = HashMap::new();
-    for decl in decls {
-        let name = match &decl.node {
-            TypedDeclKind::FunDecl { name, .. } => name,
-            TypedDeclKind::VarDecl(v) => &v.name,
-            TypedDeclKind::StructDecl { name, .. } => name,
-            TypedDeclKind::EnumDecl { name, .. } => name,
-            TypedDeclKind::VariantConstructor { name, .. } => name,
-        }
-        .clone();
-        map.insert(name, decl);
-    }
-    map
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::do_frontend_pass;
+    use crate::frontend::fe_pass;
+
+    fn fe_pass_one_file(code: &str) -> Result<HashMap<String, NamedModule>> {
+        let mut modules = HashMap::new();
+        modules.insert("main".to_string(), code.to_string());
+        let typed = fe_pass(modules)?;
+        Ok(typed
+            .into_iter()
+            .map(|(name, module)| (name, NamedModule::from(module)))
+            .collect())
+    }
 
     #[test]
     fn test_interpret_main() {
-        let ast = do_frontend_pass("fn main(): Int = 5").unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let ast = fe_pass_one_file("fn main(): Int = 5").unwrap();
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 5);
 
-        let ast = do_frontend_pass("fn main(): Int = 1 + 2").unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let ast = fe_pass_one_file("fn main(): Int = 1 + 2").unwrap();
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_interpreter_if() {
-        let ast = do_frontend_pass("fn main(): Int = if true { 1 } else { 2 }").unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let ast = fe_pass_one_file("fn main(): Int = if true { 1 } else { 2 }").unwrap();
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 1);
 
-        let ast = do_frontend_pass("fn main(): Int = if false { 1 } else { 2 }").unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let ast = fe_pass_one_file("fn main(): Int = if false { 1 } else { 2 }").unwrap();
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
     }
 
     #[test]
     fn test_fact() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }
 
@@ -501,13 +605,13 @@ fn main(): Int = fact(5)
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 120);
     }
 
     #[test]
     fn test_fib() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn fib(n: Int): Int = if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
 
@@ -515,25 +619,27 @@ fn main(): Int = fib(7)
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 13);
     }
 
     #[test]
     fn test_native_functions() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
+import { pow } from \"std/internal/native\";
+
 fn main(): Int = pow(2, 3)
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 8);
     }
 
     #[test]
     fn test_compound_statements() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn main(): Int = {
     1;
@@ -542,10 +648,10 @@ fn main(): Int = {
             ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
 
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn println[T](x: T): Bool = true
 
@@ -557,13 +663,13 @@ fn main(): Int = {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 4);
     }
 
     #[test]
     fn test_compound_decls() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn main(): Int = {
     let a: Int = 1;
@@ -573,13 +679,13 @@ fn main(): Int = {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_structs() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 struct Pair { x: Int, y: Int }
 
@@ -590,13 +696,13 @@ fn main(): Int = {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_match_primitives() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn main(): Int = match 3 {
     2 => 5,
@@ -606,10 +712,10 @@ fn main(): Int = match 3 {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 7);
 
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn main(): Int = match 3 {
     2 => 5,
@@ -618,10 +724,10 @@ fn main(): Int = match 3 {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
 
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn main(): Int = match true {
     true => 1,
@@ -630,13 +736,13 @@ fn main(): Int = match true {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 1);
     }
 
     #[test]
     fn test_match_enums() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 enum List {
     Cons(Int, List),
@@ -651,13 +757,13 @@ fn main(): Int = match Cons(1, Nil()) {
         )
         .unwrap();
 
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 1);
     }
 
     #[test]
     fn test_inner_match() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 enum List {
     Cons(Int, List),
@@ -671,13 +777,13 @@ fn main(): Int = match Cons(1, Cons(2, Nil())) {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
     }
 
     #[test]
     fn test_match_linked_list() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 enum List {
     Cons(Int, List),
@@ -703,13 +809,13 @@ fn main(): Int = {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_match_struct() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 struct Pair { x: Int, y: Int }
 
@@ -719,13 +825,13 @@ fn main(): Int = match &Pair{x: 1, y: 2} {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 
     #[test]
     fn test_match_cond() {
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn main(): Int = match 3 {
     x if x > 2 => 1,
@@ -734,10 +840,10 @@ fn main(): Int = match 3 {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 1);
 
-        let ast = do_frontend_pass(
+        let ast = fe_pass_one_file(
             "
 fn main(): Int = match 3 {
     x if x < 2 => 1,
@@ -746,7 +852,41 @@ fn main(): Int = match 3 {
 ",
         )
         .unwrap();
-        let mut interpreter = Interpreter::new(decls_to_hashmap(ast));
+        let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_modules() {
+        let ast1 = "
+import { foo } from \"foo\";
+import { bar, baz } from \"baz\";
+
+fn main(): Int = {
+    let x = foo(bar(), baz(1));
+    x
+}
+            ";
+
+        let ast2 = "
+fn foo(x: Int, y: Int): Int = x + y
+";
+
+        let ast3 = "
+fn bar(): Int = 1
+fn baz(x: Int): Int = x + 1
+";
+        let mut modules = HashMap::new();
+        modules.insert("main".to_string(), ast1.to_string());
+        modules.insert("foo".to_string(), ast2.to_string());
+        modules.insert("baz".to_string(), ast3.to_string());
+        let typed = fe_pass(modules).unwrap();
+        let mut interpreter = Interpreter::new(
+            typed
+                .into_iter()
+                .map(|(name, module)| (name, NamedModule::from(module)))
+                .collect(),
+        );
+        assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 }

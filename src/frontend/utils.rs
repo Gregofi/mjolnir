@@ -149,6 +149,10 @@ impl<T> IdEnv<T> {
         }
     }
 
+    pub fn new_with_init(init: HashMap<String, T>) -> IdEnv<T> {
+        IdEnv { ids: vec![init] }
+    }
+
     pub fn push(&mut self) {
         self.ids.push(HashMap::new());
     }

@@ -1,0 +1,10 @@
+import { Option } from "../stdlib/option.mjl";
+import { List, at } from "../stdlib/list.mjl";
+
+fn main(): Int = {
+    let lst = Cons(1, Cons(2, Cons(3, Nil())));
+    match at(lst, 1) {
+        Some(x) => x,
+        None => 0,
+    }
+}

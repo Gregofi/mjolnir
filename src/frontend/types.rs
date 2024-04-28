@@ -80,11 +80,13 @@ pub struct TypeInfo {
 /// Represents a type as it is written, for example `List[Option[T]]`.
 #[derive(Debug, Clone)]
 pub struct InstantiatedType {
+    /// The name of the type, for example `Int` or `List`.
+    /// Presumes that the types are stored in a
+    /// HashMap<TypeIndex, TypeInfo>. This is used as a key to that hashmap.
     // TODO: Consider replacing this with Rc<TypeInfo>
     // If we do this, be careful that this is used
     // by the StructType and friends, and it represents
     // for example Struct x { foo: Option<T> }
-    //                             ^^^^^^^^^
     pub ty: TypeIndex,
     pub generics: Vec<InstantiatedType>,
 }

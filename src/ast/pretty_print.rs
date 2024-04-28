@@ -13,6 +13,12 @@ impl Display for PrettyPrintWrapper<'_, DeclKind> {
     }
 }
 
+impl Display for PrettyPrintWrapper<'_, TypedDeclKind> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        self.0.pretty_print(f, 0)
+    }
+}
+
 fn print_spaces(f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
     write!(f, "{}", " ".repeat(spaces as usize))
 }
@@ -109,6 +115,52 @@ impl PrettyPrint for DeclKind {
                 write!(f, "}}")
             }
             DeclKind::TraitDecl { .. } => todo!(),
+        }
+    }
+}
+
+impl PrettyPrint for TypedDeclKind {
+    fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
+        match self {
+            TypedDeclKind::FunDecl {
+                name,
+                parameters,
+                return_type,
+                body,
+            } => {
+                write!(f, "fn {}(", name)?;
+                let parameters = parameters
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "{}): {} = ", parameters, return_type)?;
+                body.pretty_print(f, spaces + 4)
+            }
+            TypedDeclKind::VarDecl(TypedVarDecl { name, value }) => {
+                write!(f, "let {}: {} = ", name, value.ty)?;
+                value.pretty_print(f, spaces)
+            }
+            TypedDeclKind::StructDecl { name, fields } => {
+                write!(f, "struct {}", name)?;
+                writeln!(f, " {{")?;
+                for TypedIdentifier { name, ty } in fields {
+                    print_spaces(f, spaces + 4)?;
+                    write!(f, "{}: {}", name, ty)?;
+                    writeln!(f)?;
+                }
+                write!(f, "}}")
+            }
+            TypedDeclKind::EnumDecl { name, variants } => {
+                write!(f, "enum {} {{", name)?;
+                for variant in variants {
+                    print_spaces(f, spaces + 4)?;
+                    write!(f, "{}", variant)?;
+                }
+                write!(f, "}}")
+            }
+            // Do not print anything for these guys
+            TypedDeclKind::VariantConstructor { .. } => Ok(()),
         }
     }
 }
@@ -237,6 +289,18 @@ impl PrettyPrint for StmtKind {
     }
 }
 
+impl PrettyPrint for TypedStmtKind {
+    fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
+        match self {
+            TypedStmtKind::VarDecl(TypedVarDecl { name, value }) => {
+                write!(f, "let {}: {} = ", name, value.ty)?;
+                value.pretty_print(f, spaces)
+            }
+            TypedStmtKind::Expr(e) => e.pretty_print(f, spaces),
+        }
+    }
+}
+
 impl PrettyPrint for Expr {
     fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
         self.node.pretty_print(f, spaces)
@@ -255,8 +319,32 @@ impl PrettyPrint for Decl {
     }
 }
 
+impl PrettyPrint for TypedDecl {
+    fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
+        self.node.pretty_print(f, spaces)
+    }
+}
+
+impl PrettyPrint for TypedExpr {
+    fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
+        self.node.pretty_print(f, spaces)
+    }
+}
+
+impl PrettyPrint for TypedStmt {
+    fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
+        self.node.pretty_print(f, spaces)
+    }
+}
+
 impl Decl {
     pub fn display_pretty(&self) -> PrettyPrintWrapper<'_, DeclKind> {
+        PrettyPrintWrapper(&self.node)
+    }
+}
+
+impl TypedDecl {
+    pub fn display_pretty(&self) -> PrettyPrintWrapper<'_, TypedDeclKind> {
         PrettyPrintWrapper(&self.node)
     }
 }

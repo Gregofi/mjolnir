@@ -61,7 +61,7 @@ impl InferredType {
     fn to_instantiated_type(&self) -> Result<InstantiatedType, TypeAstError> {
         match self {
             InferredType::TypeVar(_) => Err(TypeAstError::NonExistingType(
-                "E0001 (Compiler bug): Cannot have type variables when typing AST".to_string(),
+                "Compiler bug: Cannot have type variables when typing AST".to_string(),
             )),
             InferredType::Constructor(Constructor { name, type_vec }) => {
                 let generics = type_vec
@@ -89,7 +89,7 @@ impl Decl {
                 ..
             } => {
                 let parameters = inferred_parameters
-                    .expect("E0002 (Compiler bug): Type inference must be done at this point")
+                    .expect("Compiler bug: Type inference must be done at this point")
                     .into_iter()
                     .zip(parameters)
                     .map(|(ty, param)| {
@@ -101,7 +101,7 @@ impl Decl {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let return_type = inferred_return_type
-                    .expect("E0003 (Compiler bug): Type inference must be done at this point")
+                    .expect("Compiler bug: Type inference must be done at this point")
                     .to_instantiated_type()?;
                 let body = body.type_ast(&HashMap::new())?;
                 TypedDeclKind::FunDecl {
@@ -268,158 +268,99 @@ impl Expr {
     }
 }
 
-/// Collects all type declarations and returns a table from type identifiers to TypeInfo. Uses the
-/// inferred types for functions, otherwise the types used are the ones from the AST.
-///
-/// @skip_functions: If true, functions will not be added to the type table. This means that
-/// the function can be used before type inference.
-pub fn collect_decls(
-    decls: &Vec<Decl>,
-    skip_functions: bool,
-) -> Result<HashMap<String, TypeInfo>, TypeAstError> {
-    let mut type_table = HashMap::new();
-
-    type_table.insert(
-        "Int".to_string(),
-        TypeInfo {
-            kind: TypeKind::BuiltIn(BuiltInType::Int),
-            generics: vec![],
-        },
-    );
-
-    type_table.insert(
-        "Unit".to_string(),
-        TypeInfo {
-            kind: TypeKind::BuiltIn(BuiltInType::Unit),
-            generics: vec![],
-        },
-    );
-
-    type_table.insert(
-        "Bool".to_string(),
-        TypeInfo {
-            kind: TypeKind::BuiltIn(BuiltInType::Bool),
-            generics: vec![],
-        },
-    );
-
-    type_table.insert(
-        "String".to_string(),
-        TypeInfo {
-            kind: TypeKind::BuiltIn(BuiltInType::String),
-            generics: vec![],
-        },
-    );
-
-    for decl in decls {
-        match &decl.node {
-            DeclKind::FunDecl {
-                name,
-                generics,
-                inferred_parameters,
-                inferred_return_type,
-                ..
-            } => {
-                if skip_functions {
-                    continue;
-                }
-                let parameters = inferred_parameters
-                    .as_ref()
-                    .ok_or(TypeAstError::Untyped(
-                        "Type inference must be done at this point".to_string(),
-                    ))?
-                    .iter()
-                    .map(|ty| {
-                        let ty = ty.to_instantiated_type()?;
-                        Ok(Parameter {
-                            name: name.clone(),
-                            ty,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let return_type = inferred_return_type
-                    .clone()
-                    .expect("Return type of a function must be specified explicitly")
-                    .to_instantiated_type()?;
-                let function_type = FunctionType {
-                    parameters,
-                    return_type,
-                };
-                type_table.insert(
-                    name.clone(),
-                    TypeInfo {
-                        kind: TypeKind::Function(function_type),
-                        generics: generics.clone(),
-                    },
-                );
-            }
-            DeclKind::StructDecl {
-                name,
-                generics,
-                fields,
-            } => {
-                let fields = fields.iter().try_fold(
-                    HashMap::new(),
-                    |mut acc, StronglyTypedIdentifier { name, ty }| {
-                        let ty = ty.to_instantiated_type()?;
-                        acc.insert(name.clone(), ty);
-                        Ok(acc)
-                    },
-                )?;
-                let struct_type = StructType {
-                    name: name.clone(),
-                    fields,
-                };
-                type_table.insert(
-                    name.clone(),
-                    TypeInfo {
-                        kind: TypeKind::Struct(struct_type),
-                        generics: generics.clone(),
-                    },
-                );
-            }
-            DeclKind::EnumDecl {
-                name,
-                variants,
-                generics,
-            } => {
-                let variants = variants
-                    .iter()
-                    .map(|variant| {
-                        let fields = variant
-                            .fields
-                            .clone()
-                            .into_iter()
-                            .map(|field| field.to_instantiated_type())
-                            .collect::<Result<Vec<_>, _>>()?;
-                        Ok(EnumVariantType {
-                            name: variant.name.clone(),
-                            fields,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let enum_type = EnumType {
-                    name: name.clone(),
-                    variants,
-                };
-                type_table.insert(
-                    name.clone(),
-                    TypeInfo {
-                        kind: TypeKind::Enum(enum_type),
-                        generics: generics.clone(),
-                    },
-                );
-            }
-            DeclKind::TraitDecl { .. } => todo!(),
-        }
-    }
-    Ok(type_table)
-}
-
 pub fn type_ast(ast: Vec<Decl>) -> Result<Vec<TypedDecl>, TypeAstError> {
     let typed = ast
         .into_iter()
         .map(|decl| decl.type_ast())
         .collect::<Result<_, _>>()?;
+    Ok(typed)
+}
+
+/// Collects all variants from all enums.
+/// Returns table `moduleName -> enumName -> [variantName]`
+pub fn collect_enums(
+    modules: &HashMap<String, TypedModule>,
+) -> HashMap<String, HashMap<String, Vec<String>>> {
+    let mut enum_table: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
+
+    for (module_name, module) in modules.iter() {
+        for decl in module.decls.iter() {
+            match &decl.node {
+                TypedDeclKind::EnumDecl { name, variants, .. } => {
+                    let variants = variants.iter().map(|v| v.name.clone()).collect();
+                    enum_table
+                        .entry(module_name.clone())
+                        .or_insert(HashMap::new())
+                        .insert(name.clone(), variants);
+                }
+                _ => (),
+            }
+        }
+    }
+
+    enum_table
+}
+
+fn get_enum_variants(enum_name: &str, variants: &HashMap<String, Vec<String>>) -> Vec<String> {
+    variants.get(enum_name).unwrap_or(&vec![]).to_vec()
+}
+
+/// Extends the import list with variants of the imported enums.
+fn collect_variants(
+    import: Import,
+    variants: &HashMap<String, HashMap<String, Vec<String>>>,
+) -> Import {
+    let imported = variants.get(&import.path);
+    if imported.is_none() {
+        return import;
+    }
+
+    let mut new_ids = vec![];
+    for import in import.imported_ids {
+        let variants = get_enum_variants(&import, &imported.unwrap());
+        new_ids.extend(variants);
+        new_ids.push(import);
+    }
+
+    Import {
+        path: import.path,
+        imported_ids: new_ids,
+    }
+}
+
+pub fn type_modules(
+    modules: HashMap<String, Module>,
+) -> Result<HashMap<String, TypedModule>, TypeAstError> {
+    let mut typed: HashMap<String, TypedModule> = modules
+        .into_iter()
+        .map(|(path, module)| {
+            let typed_decls = module
+                .decls
+                .into_iter()
+                .map(|decl| decl.type_ast())
+                .collect::<Result<_, _>>()?;
+            Ok((
+                path,
+                TypedModule {
+                    decls: typed_decls,
+                    imports: module.imports,
+                },
+            ))
+        })
+        .collect::<Result<_, _>>()?;
+
+    // For interpreting, we need to "fake" imports. When user uses a List, he imports
+    // List but actually only uses its variants in the code. We put these variant names
+    // into the imports list.
+    let enums = collect_enums(&typed);
+
+    for (_, module) in typed.iter_mut() {
+        module.imports = module
+            .imports
+            .iter()
+            .map(|import| collect_variants(import.clone(), &enums))
+            .collect();
+    }
+
     Ok(typed)
 }
