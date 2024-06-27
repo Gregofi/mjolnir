@@ -1,3 +1,5 @@
+import { putchar, println, assert, readln } from "std/internal/native";
+
 enum Option[T] {
     Some(T),
     None,
@@ -19,7 +21,7 @@ fn head[T](lst: List[T]): Option[T] = match lst {
     Nil => None(),
 }
 
-fn println(lst: List[Char]) = match lst {
+fn println(lst: List[Char]): Unit = match lst {
     Cons(head, tail) => {
         putchar(head);
         println(tail)

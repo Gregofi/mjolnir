@@ -1,4 +1,4 @@
-use crate::ast::{StmtKind, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern};
+use crate::ast::{StmtKind, Import, Module, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern};
 use crate::frontend::utils::{WeaklyTypedIdentifier, StronglyTypedIdentifier, WrittenType, GenericDeclaration, TypeDeclaration};
 use std::str::FromStr;
 
@@ -49,6 +49,8 @@ match {
     "struct" => STRUCT,
     "enum" => ENUM,
     "match" => MATCH,
+    "import" => IMPORT,
+    "from" => FROM,
     "\"" => DOUBLE_QUOTE,
     "'" => SINGLE_QUOTE,
 
@@ -59,7 +61,23 @@ match {
     r"'([^'\\]|\\[~ntr\\'])'" => CHAR,
 }
 
-pub TopLevelDecls: Vec<Decl> = {
+pub Module: (Vec<Import>, Vec<Decl>) = {
+    <Imports> <TopLevelDecls>
+}
+
+Import: Import = {
+    IMPORT LBRACE <imported_ids: Identifiers> RBRACE FROM <path: StringLiteral> SEMICOLON => {
+        Import {
+            imported_ids,
+            path: path.to_string(),
+        }
+    }
+}
+
+Imports: Vec<Import> = <Import*>;
+
+
+TopLevelDecls: Vec<Decl> = {
     <mut v: (<TopLevelDecl>)*> <e: TopLevelDecl> => { v.push(e); v }
 }
 
@@ -375,6 +393,15 @@ Number: Expr = {
         node: ExprKind::Int(i64::from_str(n).unwrap()),
         location: Location::new(l, r),
         inferred_ty: None,
+    }
+}
+
+StringLiteral: String = {
+    <str: STRING_LITERAL> => {
+        let mut chars = str.chars();
+        chars.next();
+        chars.next_back();
+        chars.as_str().to_string()
     }
 }
 

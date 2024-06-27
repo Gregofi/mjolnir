@@ -1,0 +1,8 @@
+import { abs } from "../stdlib/math.mjl";
+import { assert } from "std/internal/native";
+
+fn main(): Int = {
+    assert(abs(2) == 2);
+    assert(abs(0 - 2) == 2);
+    0
+}

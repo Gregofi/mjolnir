@@ -1,14 +1,14 @@
-use crate::ast::Decl;
+use crate::ast::{Decl, Import};
 
 extern crate lalrpop_util;
 use anyhow::{anyhow, Result};
 use lalrpop_util::lalrpop_mod;
 
-pub fn parse_ast(input: &str) -> Result<Vec<Decl>> {
+pub fn parse_ast(input: &str) -> Result<(Vec<Import>, Vec<Decl>)> {
     lalrpop_mod!(pub grammar);
     // TODO: This is a quick hack to avoid lifetimes,
     // we should parse the error from parse here and show proper error message.
-    grammar::TopLevelDeclsParser::new()
+    grammar::ModuleParser::new()
         .parse(input)
         .map_err(|err| anyhow!("Parse error: {:?}", err))
 }
@@ -236,5 +236,23 @@ fn foo() = '\n'
 "
         )
         .is_ok());
+    }
+
+    #[test]
+    fn test_imports() {
+        let (imports, _) = parse_ast(
+            "
+import { foo } from \"foo\";
+import { bar, baz } from \"./baz\";
+
+fn main() = foo()
+",
+        )
+        .unwrap();
+        assert_eq!(imports.len(), 2);
+        assert_eq!(imports[0].imported_ids, vec!["foo"]);
+        assert_eq!(imports[0].path, "foo");
+        assert_eq!(imports[1].imported_ids, vec!["bar", "baz"]);
+        assert_eq!(imports[1].path, "./baz");
     }
 }

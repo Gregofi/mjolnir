@@ -1,7 +1,24 @@
-/// TODO: Check if the Rcs are truly necessary.
+/// Type inference module, uses Hindley-Milner type inference algorithm.
+/// Type inference consists of two main steps. First, it collects the types
+/// from all modules for global namespace (global functions, constants and type declarations)
+/// Then it performs type inference for each module.
+///
+/// Keep it mind that the type inference is somewhat fuzzy, if you write a function
+/// `def foo(): Bar = zoo()`, it does not check that he type `Bar` is actually
+/// a type. It just checks that zoo returns the type with the same name (additionaly,
+/// if the two types had generics, it would check that the generics are the same).
+///
+/// The main structure used is the Type structure, which is a constructor with a name
+/// and arguments (Int[], Float[], Result[T1, T2], etc.). When it has arguments,
+/// those can either be types or type variables, when the types are not yet known
+/// in the inference.
+// TODO: Check if the Rcs are truly necessary.
 use super::utils::{GenericDeclaration, IdEnv, StronglyTypedIdentifier, WrittenType};
-use crate::ast::{Decl, DeclKind, Expr, ExprKind, Operator, Pattern, Stmt, StmtKind, VarDecl};
+use crate::ast::{
+    Decl, DeclKind, Expr, ExprKind, Import, Module, Operator, Pattern, Stmt, StmtKind, VarDecl,
+};
 use crate::backend::ast_interpreter::native_functions::get_native_functions;
+use crate::constants::STD_NATIVE_MODULE;
 use log::debug;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -12,6 +29,8 @@ use std::rc::Rc;
 pub enum TypeInferenceError {
     TypeMismatch(String),
     UnificationError(String),
+    /// When a type is expected, but none is found.
+    TypeExpected(String),
 }
 
 impl Display for TypeInferenceError {
@@ -19,6 +38,9 @@ impl Display for TypeInferenceError {
         match self {
             TypeInferenceError::TypeMismatch(s) => write!(f, "Type mismatch: {}", s),
             TypeInferenceError::UnificationError(s) => write!(f, "Unification error: {}", s),
+            TypeInferenceError::TypeExpected(s) => {
+                write!(f, "Type must be known at this point: {}", s)
+            }
         }
     }
 }
@@ -157,6 +179,20 @@ impl Type {
         })
     }
 
+    /// Returns the return type of a function, if the type is a function.
+    /// For example, Function<Int, Bool> will return Some("Int").
+    pub fn get_return_type(&self) -> Option<String> {
+        match self {
+            Type::Constructor(cons) if cons.name == "Function" => {
+                match cons.type_vec.get(0).unwrap().as_ref() {
+                    Type::Constructor(cons) => Some(cons.name.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Creates a new type where every occurence of each variable in map is replaced.
     /// If the type is a constructor which name matches the name in map,
     /// the replacement cannot be performed and error will be returned.
@@ -231,9 +267,25 @@ impl StructMetadata {
     }
 }
 
+/// Holds the metadata of a type, for example the fields and generics of a struct.
+/// Does not hold a name, expected to be stored in the symbol table.
 #[derive(Debug, Clone)]
 enum TypeMetadata {
     Struct(StructMetadata),
+    /// Enum variants are represented as functions, here we store the names of those functions.
+    /// This is mainly used for imports (the user only imports the enum types, not the variants)
+    /// so that we know what functions to export.
+    Enum {
+        variant_names: Vec<String>,
+    },
+}
+
+/// Semi-typed module. Mainly items that can be used across modules, like types and functions.
+#[derive(Debug, Clone)]
+struct ModuleMetadata {
+    types: HashMap<String, TypeMetadata>,
+    /// The symbol table for symbols which are not types (functions, variables, etc.)
+    ids: HashMap<String, TypeScheme>,
 }
 
 pub struct SymbolTable {
@@ -273,6 +325,14 @@ impl SymbolTable {
             }
         }
         Ok(())
+    }
+
+    fn new(ids: HashMap<String, TypeScheme>, type_ids: HashMap<String, TypeMetadata>) -> Self {
+        Self {
+            unif_table: HashMap::new(),
+            ids: IdEnv::new_with_init(ids),
+            type_ids,
+        }
     }
 
     fn visit_decl(&mut self, decl: &mut Decl) -> Result<(), TypeInferenceError> {
@@ -487,7 +547,7 @@ impl SymbolTable {
                 // TODO: The inference does not really do anything at this point, we would
                 // like the following:
                 // ```
-                // StructFoo<T> { x: T};
+                // StructFoo<T> { x: T };
                 // let x = StructFoo { x: 1 };
                 //
                 // // instead of
@@ -586,6 +646,29 @@ impl SymbolTable {
         }?;
         expr.inferred_ty = Some(res.clone());
         Ok(res)
+    }
+
+    /// Collects types from an imported module into the current symbol table.
+    /// Returns the symbol table with the imported types.
+    fn collect_from_import(&mut self, imported_ids: &[&str], imported_module: &ModuleMetadata) {
+        for id in imported_ids {
+            if let Some(ty) = imported_module.ids.get(*id) {
+                self.ids.insert(id.to_string(), ty.clone());
+            } else if let Some(ty) = imported_module.types.get(*id) {
+                match ty {
+                    TypeMetadata::Struct(metadata) => {
+                        self.type_ids
+                            .insert(id.to_string(), TypeMetadata::Struct(metadata.clone()));
+                    }
+                    TypeMetadata::Enum { variant_names } => {
+                        for variant in variant_names {
+                            let cons = imported_module.ids.get(variant).expect("Inner compiler error; Couldn't find variant constructor which should be exported");
+                            self.ids.insert(variant.clone(), cons.clone());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn unify_pattern(
@@ -794,7 +877,6 @@ impl SymbolTable {
                         name
                     )));
                 };
-                println!("Inferred type of {} is {}", name, finalized_ty);
                 StmtKind::VarDecl(VarDecl {
                     name,
                     ty,
@@ -808,80 +890,217 @@ impl SymbolTable {
     }
 }
 
-pub fn type_inference(mut decls: Vec<Decl>) -> Result<Vec<Decl>, TypeInferenceError> {
-    // Previsit decls, collect necessary info about types.
-    let mut type_ids = HashMap::new();
-    for decl in &decls {
-        if let DeclKind::StructDecl {
-            name,
-            fields,
-            generics,
-        } = &decl.node
-        {
-            let fields: Vec<_> = fields
-                .iter()
-                .map(|StronglyTypedIdentifier { name, ty }| (name.clone(), ty.clone().into_type()))
-                .collect();
+/// Traverse over module and collect all top types and identifiers.
+fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceError> {
+    let mut module_metadata = ModuleMetadata {
+        types: HashMap::new(),
+        ids: HashMap::new(),
+    };
+    // Collect all the types
+    for decl in &module.decls {
+        match &decl.node {
+            DeclKind::StructDecl {
+                name,
+                fields,
+                generics,
+            } => {
+                let fields: Vec<_> = fields
+                    .iter()
+                    .map(|StronglyTypedIdentifier { name, ty }| {
+                        (name.clone(), ty.clone().into_type())
+                    })
+                    .collect();
 
-            type_ids.insert(
-                name.clone(),
-                TypeMetadata::Struct(StructMetadata {
-                    generics: generics.iter().map(|g| g.name.clone()).collect(),
-                    fields,
-                }),
-            );
+                module_metadata.types.insert(
+                    name.clone(),
+                    TypeMetadata::Struct(StructMetadata {
+                        generics: generics.iter().map(|g| g.name.clone()).collect(),
+                        fields,
+                    }),
+                );
+            }
+            DeclKind::FunDecl {
+                name,
+                generics,
+                parameters,
+                return_type,
+                ..
+            } => {
+                let mut typed_params = vec![];
+                for param in parameters {
+                    let ty = param
+                        .ty
+                        .clone()
+                        .ok_or(TypeInferenceError::TypeExpected(
+                            "Function parameter".to_string(),
+                        ))?
+                        .into_type()
+                        .into_rc();
+                    typed_params.push(ty.clone());
+                    module_metadata
+                        .ids
+                        .insert(param.name.clone(), (*ty).clone().into_scheme());
+                }
+
+                let ret_ty_stated = return_type
+                    .clone()
+                    .ok_or(TypeInferenceError::TypeExpected(
+                        "Function return type".to_string(),
+                    ))?
+                    .into_type()
+                    .into_rc();
+
+                let fun_ty = Type::create_function(typed_params.clone(), ret_ty_stated.clone());
+
+                let fun_scheme =
+                    TypeScheme::create_function(generics.to_vec(), fun_ty.clone().into_rc());
+
+                debug!("Adding function {} with type {}", name, fun_ty);
+                module_metadata.ids.insert(name.clone(), fun_scheme);
+            }
+            DeclKind::EnumDecl {
+                name,
+                variants,
+                generics,
+            } => {
+                // The return type of the variant constructors. This needn't be a type scheme
+                // since the functions will be type schemes.
+                let enum_ty = Type::Constructor(Constructor {
+                    name: name.clone(),
+                    type_vec: generics
+                        .iter()
+                        .map(|g| Type::create_constant(g.name.clone()))
+                        .collect(),
+                })
+                .into_rc();
+
+                // Add the variants as function types
+                for variant in variants {
+                    let fields: Vec<Rc<Type>> = variant
+                        .fields
+                        .clone()
+                        .into_iter()
+                        .map(|field| field.into_type().into_rc())
+                        .collect();
+                    let fun_ty = TypeScheme {
+                        ty: Type::create_function(fields.clone(), enum_ty.clone()).into_rc(),
+                        generics: generics.clone(),
+                    };
+                    module_metadata.ids.insert(variant.name.clone(), fun_ty);
+                }
+
+                // In case the user imports the enum, we need to know what functions to export.
+                module_metadata.types.insert(
+                    name.clone(),
+                    TypeMetadata::Enum {
+                        variant_names: variants.iter().map(|v| v.name.clone()).collect(),
+                    },
+                );
+            }
+            DeclKind::TraitDecl { .. } => (),
         }
     }
+    Ok(module_metadata)
+}
 
-    // Wrap it in refcell so we can use it in the closures.
-    let symbol_table = RefCell::new({
-        let mut table = SymbolTable {
-            unif_table: HashMap::new(),
-            ids: IdEnv::new(),
-            type_ids,
-        };
-        table.ids.push();
-        table
-    });
+/// Performs type inference.
+/// Returns the same decls with the inferred types filled.
+pub fn type_infer_modules(
+    mut modules: HashMap<String, Module>,
+) -> Result<HashMap<String, Module>, TypeInferenceError> {
+    // First, we need to collect all the types from all the modules.
+    let mut module_metadata = modules
+        .iter()
+        .map(|(name, module)| Ok((name.clone(), precollect_types(module)?)))
+        .collect::<Result<HashMap<_, _>, _>>()?;
 
+    // Also native functions
+    let mut native_funs = ModuleMetadata {
+        types: HashMap::new(),
+        ids: HashMap::new(),
+    };
     for native_fun in get_native_functions() {
-        symbol_table
-            .borrow_mut()
+        native_funs
             .ids
             .insert(native_fun.name.clone(), native_fun.ty.clone());
     }
+    module_metadata.insert(STD_NATIVE_MODULE.to_string(), native_funs);
 
-    // Do the actual type inference
-    for decl in decls.iter_mut() {
-        symbol_table.borrow_mut().visit_decl(decl)?;
-    }
-
-    // Close all the types (eliminate type variables)
-    decls
+    // Perform type inference for each module
+    let result: HashMap<String, Module> = modules
         .into_iter()
-        .map(|decl| {
-            decl.fold(
-                &|decl| symbol_table.borrow_mut().finalize_decl(decl),
-                &|stmt| symbol_table.borrow_mut().finalize_stmt(stmt),
-                &|mut expr| {
-                    expr.inferred_ty = if let Some(ty) = expr.inferred_ty {
-                        Some(symbol_table.borrow_mut().close_type(&ty)?)
-                    } else {
-                        return Err(TypeInferenceError::UnificationError(
-                            "Type inference failed, did not find type variable".to_string(),
-                        ));
-                    };
-                    Ok(expr)
+        .map(|(name, mut module)| {
+            let metadata = module_metadata
+                .get(&name)
+                .expect("Internal compiler error, missing metadata");
+
+            let symbol_table = RefCell::new(SymbolTable {
+                unif_table: HashMap::new(),
+                ids: IdEnv::new_with_init(metadata.ids.clone()),
+                type_ids: metadata.types.clone(),
+            });
+
+            // Collect all the types from the imports
+            for import in &module.imports {
+                let imported_module_metadata =
+                    module_metadata.get(&import.path).ok_or_else(|| {
+                        TypeInferenceError::TypeMismatch(format!(
+                            "Module {} not found in imports",
+                            import.path
+                        ))
+                    })?;
+
+                for named_import in &import.imported_ids {
+                    symbol_table
+                        .borrow_mut()
+                        .collect_from_import(&[named_import], imported_module_metadata);
+                }
+            }
+
+            // Do the actual type inference
+            for decl in &mut module.decls {
+                symbol_table.borrow_mut().visit_decl(decl)?;
+            }
+
+            // Fold over (or rather for-each) over all the AST nodes and finalize the types (remove
+            // type vars)
+            let result = module
+                .decls
+                .into_iter()
+                .map(|decl| {
+                    decl.fold(
+                        &|decl| symbol_table.borrow_mut().finalize_decl(decl),
+                        &|stmt| symbol_table.borrow_mut().finalize_stmt(stmt),
+                        &|mut expr| {
+                            expr.inferred_ty = if let Some(ty) = expr.inferred_ty {
+                                Some(symbol_table.borrow_mut().close_type(&ty)?)
+                            } else {
+                                return Err(TypeInferenceError::UnificationError(
+                                    "Type inference failed, did not find type variable".to_string(),
+                                ));
+                            };
+                            Ok(expr)
+                        },
+                    )
+                })
+                .collect::<Result<Vec<Decl>, _>>()?;
+            Ok((
+                name,
+                Module {
+                    decls: result,
+                    imports: module.imports,
                 },
-            )
+            ))
         })
-        .collect::<Result<_, _>>()
+        .collect::<Result<HashMap<String, Module>, _>>()?;
+
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::parser::parse_ast;
+    use crate::{ast::Import, frontend::parser::parse_ast};
     use regex::Regex;
 
     fn init() {
@@ -917,38 +1136,51 @@ mod tests {
         assert!(regex.is_match(&filled.to_string()));
     }
 
+    fn infer_module(code: &str) -> Result<Vec<Decl>, TypeInferenceError> {
+        let decls = parse_ast(code).unwrap().1;
+        let mut modules = HashMap::new();
+        modules.insert(
+            "/main".to_string(),
+            Module {
+                decls,
+                imports: vec![],
+            },
+        );
+        let decls = type_infer_modules(modules)?;
+        Ok(decls.get("/main").unwrap().decls.clone())
+    }
+
     #[test]
     fn test_basic_inference() {
-        let ast = parse_ast("fn foo(x: Int): Int = { let y = x; let z = foo(y); foo(z) }");
-        let decls = type_inference(ast.unwrap()).unwrap();
+        let decls = infer_module("fn foo(x: Int): Int = { let y = x; let z = foo(y); foo(z) }");
         let result = "fn foo(x: Int): Int = { let y: Int = x; let z: Int = foo(y); foo(z) }";
-        assert_eq!(decls.first().unwrap().to_string(), result);
+        assert_eq!(decls.unwrap().first().unwrap().to_string(), result);
     }
 
-    #[test]
-    fn test_basic_fun_inference() {
-        let ast = parse_ast("fn foo(x: Int) = 1");
-        let decls = type_inference(ast.unwrap()).unwrap();
-        let result = "fn foo(x: Int): Int = 1";
-        assert_eq!(decls.first().unwrap().to_string(), result);
-
-        let ast = parse_ast("fn foo(x) = 1   fn bar(): Int = foo(1)");
-        let decls = type_inference(ast.unwrap()).unwrap();
-        let result = "fn foo(x: Int): Int = 1   fn bar(): Int = foo(1)";
-        assert_eq!(
-            decls
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join("   "),
-            result
-        );
-    }
+    // Long time ago this worked (and it still could!), but since modules were implemented all
+    // functions must be typed.
+    // #[test]
+    // fn test_basic_fun_inference() {
+    //     let decls = infer_module("fn foo(x: Int) = 1");
+    //     let result = "fn foo(x: Int): Int = 1";
+    //     assert_eq!(decls.first().unwrap().to_string(), result);
+    //
+    //     let decls = infer_module("fn foo(x) = 1   fn bar(): Int = foo(1)");
+    //     let result = "fn foo(x: Int): Int = 1   fn bar(): Int = foo(1)";
+    //     assert_eq!(
+    //         decls
+    //             .iter()
+    //             .map(|x| x.to_string())
+    //             .collect::<Vec<_>>()
+    //             .join("   "),
+    //         result
+    //     );
+    // }
 
     #[test]
     fn test_enums_inference() {
         init();
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 enum Option[T] {
     Some(T),
@@ -980,8 +1212,8 @@ fn main(): Int = {
     }
 }
 ",
-        );
-        let decls = type_inference(ast.unwrap()).unwrap();
+        )
+        .unwrap();
         assert!(decls.len() == 5);
         assert!(decls[4].to_string().contains("fn main(): Int = {"));
         assert!(decls[4].to_string().contains("let lst: List[Int] = Nil();"));
@@ -993,7 +1225,7 @@ fn main(): Int = {
     #[test]
     fn test_match_with_cond() {
         init();
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 enum Option[T] {
     Some(T),
@@ -1017,14 +1249,13 @@ fn main(): Int = {
     0
 }
 ",
-        );
-        let decls = type_inference(ast.unwrap()).unwrap();
-
+        )
+        .unwrap();
         assert!(decls.len() == 4);
         assert!(decls[3].to_string().contains("let lst: List[Int]"));
         assert!(decls[3].to_string().contains("let exists: Bool"));
 
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 fn main(): Int = {
     match 1 {
@@ -1034,13 +1265,13 @@ fn main(): Int = {
 }
 ",
         );
-        assert!(type_inference(ast.unwrap()).is_err());
+        assert!(decls.is_err());
     }
 
     #[test]
     fn test_structs_inference() {
         init();
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 struct Point {
     x: Int,
@@ -1054,9 +1285,9 @@ fn main(): Int = {
     p.x + p.y
 }
 ",
-        );
+        )
+        .unwrap();
 
-        let decls = type_inference(ast.unwrap()).unwrap();
         println!("{}\n", decls[1]);
         assert!(decls[1].to_string().contains("fn main(): Int = {"));
         assert!(decls[1]
@@ -1065,7 +1296,7 @@ fn main(): Int = {
         assert!(decls[1].to_string().contains("let x: Int = p.x;"));
         assert!(decls[1].to_string().contains("let y: Int = p.y;"));
 
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 struct Point {
     x: Int,
@@ -1079,11 +1310,9 @@ fn main(): Int = {
 }
 ",
         );
-
-        let decls = type_inference(ast.unwrap());
         assert!(decls.is_err());
 
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 struct Point {
     x: Int,
@@ -1097,15 +1326,13 @@ fn main(): Int = {
 }
 ",
         );
-
-        let decls = type_inference(ast.unwrap());
         assert!(decls.is_err());
     }
 
     #[test]
     fn test_structs_with_generics() {
         init();
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 struct Point[T] {
     x: T,
@@ -1118,9 +1345,9 @@ fn main(): Int = {
     sum
 }
 ",
-        );
+        )
+        .unwrap();
 
-        let decls = type_inference(ast.unwrap()).unwrap();
         println!("{}\n", decls[1]);
         assert!(decls[1].to_string().contains("fn main(): Int = {"));
         assert!(decls[1]
@@ -1132,7 +1359,7 @@ fn main(): Int = {
     #[test]
     fn test_struct_match() {
         init();
-        let ast = parse_ast(
+        let decls = infer_module(
             "
 struct Point {
     x: Int,
@@ -1147,9 +1374,9 @@ fn main(): Int = {
     sum
 }
 ",
-        );
+        )
+        .unwrap();
 
-        let decls = type_inference(ast.unwrap()).unwrap();
         println!("{}\n", decls[1]);
         assert!(decls[1].to_string().contains("fn main(): Int = {"));
         assert!(decls[1]
@@ -1159,9 +1386,221 @@ fn main(): Int = {
     }
 
     #[test]
+    fn test_imports() {
+        init();
+        // The import syntax works with filesystem.
+        // Instead, in here, we will hardcode the imports to the
+        // structure.
+        let main = parse_ast(
+            "
+fn main(): Int = {
+    let p = foo();
+    bar(p)
+}
+",
+        )
+        .unwrap();
+        let import = parse_ast(
+            "
+fn foo(): Int = 1
+fn bar(x: Int): Int = x * 2
+            ",
+        )
+        .unwrap();
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "/main".to_string(),
+            Module {
+                decls: main.1,
+                imports: vec![Import {
+                    path: "/foobar".to_string(),
+                    imported_ids: vec!["foo".to_string(), "bar".to_string()],
+                }],
+            },
+        );
+
+        modules.insert(
+            "/foobar".to_string(),
+            Module {
+                decls: import.1,
+                imports: vec![],
+            },
+        );
+
+        let decls = type_infer_modules(modules).unwrap();
+        let main = decls.get("/main").unwrap();
+        assert!(main.decls[0].to_string().contains("let p: Int = foo();"));
+    }
+
+    #[test]
+    fn test_imports_complicated() {
+        init();
+        let f1 = parse_ast(
+            "
+fn main(): Int = {
+    let p = foo();
+    bar(p)
+}
+",
+        )
+        .unwrap();
+        let f2 = parse_ast(
+            "
+fn foo(): Int = 1
+fn bar(x: Int): Int = double_value(x)
+            ",
+        )
+        .unwrap();
+        let f3 = parse_ast(
+            "
+fn double_value(x: Int): Int = x * 2
+            ",
+        )
+        .unwrap();
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "/f1".to_string(),
+            Module {
+                decls: f1.1,
+                imports: vec![Import {
+                    path: "/f2".to_string(),
+                    imported_ids: vec!["foo".to_string(), "bar".to_string()],
+                }],
+            },
+        );
+
+        modules.insert(
+            "/f2".to_string(),
+            Module {
+                decls: f2.1,
+                imports: vec![Import {
+                    path: "/f3".to_string(),
+                    imported_ids: vec!["double_value".to_string()],
+                }],
+            },
+        );
+
+        modules.insert(
+            "/f3".to_string(),
+            Module {
+                decls: f3.1,
+                imports: vec![],
+            },
+        );
+
+        let decls = type_infer_modules(modules).unwrap();
+        let main = decls.get("/f1").unwrap();
+        assert!(main.decls[0].to_string().contains("let p: Int = foo();"));
+    }
+
+    #[test]
+    fn test_import_non_existing_identifier() {
+        init();
+        let main = parse_ast(
+            "
+            fn main(): Int = {
+                let x = non_existing_function();
+                0
+            }
+            ",
+        )
+        .unwrap();
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "/main".to_string(),
+            Module {
+                decls: main.1,
+                imports: vec![Import {
+                    path: STD_NATIVE_MODULE.to_string(),
+                    imported_ids: vec!["non_existing_function".to_string()],
+                }],
+            },
+        );
+
+        let result = type_infer_modules(modules);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_import_non_existing_module() {
+        init();
+        let main = parse_ast(
+            "
+            fn main(): Int = {
+                let x = non_existing_function();
+                0
+            }
+            ",
+        )
+        .unwrap();
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "/main".to_string(),
+            Module {
+                decls: main.1,
+                imports: vec![Import {
+                    path: "/non_existing_module".to_string(),
+                    imported_ids: vec!["non_existing_function".to_string()],
+                }],
+            },
+        );
+
+        let result = type_infer_modules(modules);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_import_function_with_incorrect_argument_types() {
+        init();
+        let main = parse_ast(
+            "
+            fn main(): Int = {
+                let x = imported_function(1, true);
+                0
+            }
+            ",
+        )
+        .unwrap();
+
+        let imported_module = parse_ast(
+            "
+            fn imported_function(a: Int, b: Int): Int = a + b
+            ",
+        )
+        .unwrap();
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "/main".to_string(),
+            Module {
+                decls: main.1,
+                imports: vec![Import {
+                    path: "/imported_module".to_string(),
+                    imported_ids: vec!["imported_function".to_string()],
+                }],
+            },
+        );
+
+        modules.insert(
+            "/imported_module".to_string(),
+            Module {
+                decls: imported_module.1,
+                imports: vec![],
+            },
+        );
+
+        let result = type_infer_modules(modules);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_native_function() {
         init();
-        let ast = parse_ast(
+        let main = parse_ast(
             "
 fn main(): Int = {
     let x = pow(2, 3);
@@ -1169,9 +1608,28 @@ fn main(): Int = {
     0
 }
 ",
+        )
+        .unwrap();
+
+        let mut modules = HashMap::new();
+        modules.insert(
+            "/main".to_string(),
+            Module {
+                decls: main.1,
+                imports: vec![Import {
+                    path: STD_NATIVE_MODULE.to_string(),
+                    imported_ids: vec!["pow".to_string(), "assert".to_string()],
+                }],
+            },
         );
 
-        let decls = type_inference(ast.unwrap()).unwrap();
+        let decls = type_infer_modules(modules)
+            .unwrap()
+            .get("/main")
+            .unwrap()
+            .decls
+            .clone();
+
         assert!(decls.len() == 1);
         assert!(decls[0].to_string().contains("let x: Int"));
     }

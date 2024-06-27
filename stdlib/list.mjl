@@ -1,0 +1,12 @@
+import { Option } from "./option.mjl";
+
+enum List[T] {
+    Cons(T, List[T]),
+    Nil,
+}
+
+fn at[T](lst: List[T], i: Int): Option[T] = match lst {
+    Cons(head, _) if i == 0 => Some(head),
+    Cons(_, tail) => at(tail, i - 1),
+    _ => None(),
+}
