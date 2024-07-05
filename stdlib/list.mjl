@@ -5,8 +5,69 @@ enum List[T] {
     Nil,
 }
 
-fn at[T](lst: List[T], i: Int): Option[T] = match lst {
-    Cons(head, _) if i == 0 => Some(head),
-    Cons(_, tail) => at(tail, i - 1),
-    _ => None(),
+impl List[T] {
+    fn at(i: Int): Option[T] = match self {
+        Cons(head, _) if i == 0 => Some(head),
+        Cons(_, tail) => tail.at(i - 1),
+        _ => None(),
+    }
+
+    fn is_empty(): Bool = match self {
+        Nil() => true,
+        _ => false,
+    }
+
+    fn first(): Option[T] = match self {
+        Cons(x, _) => Some(x),
+        Nil() => None(),
+    }
+
+    fn last(): Option[T] = match self {
+        Cons(head, Nil) => Some(head),
+        Cons(_, rest) => rest.last(),
+        _ => None(),
+    }
+
+    fn prepended(x: T): List[T] = Cons(x, self)
+
+    fn appended(x: T): List[T] = match self {
+        Cons(head, tail) => Cons(head, tail.appended(x)),
+        Nil => Cons(x, Nil()),
+    }
+
+    fn find(x: T): Option[T] = match self {
+        Cons(head, _) if head == x => Some(head),
+        Cons(_, tail) => tail.find(x),
+        _ => None(),
+    }
+
+    fn contains(x: T): Bool = self.find(x).is_some()
+
+    fn map(fun: (T) => T): List[T] = match self {
+        Cons(head, tail) => Cons(fun(head), tail.map(fun)),
+        Nil => Nil(),
+    }
+
+    fn filter(fun: (T) => Bool): List[T] = match self {
+        Cons(head, tail) => {
+            if fun(head) {
+                Cons(head, tail.filter(fun))
+            } else {
+                tail.filter(fun)
+            }
+        },
+        Nil => Nil(),
+    }
+
+    fn fold_right[Q](init: Q, op: (T, Q) => Q): Q = match self {
+        Cons(head, tail) => op(head, tail.fold_right(init, op)),
+        Nil => init,
+    }
+
+    fn fold_left[Q](init: Q, op: (T, Q) => Q): Q = match self {
+        Cons(head, tail) => tail.fold_left(op(head, init), op),
+        Nil => init,
+    }
+
+    fn reverse(): List[T] = self.fold_left(Nil(), Cons)
 }

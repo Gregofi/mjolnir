@@ -1,7 +1,7 @@
 pub mod display;
 pub mod pretty_print;
 
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
 use std::rc::Rc;
 
 use crate::frontend::type_inference::Type as InferredType;
@@ -170,222 +170,6 @@ impl Decl {
     }
 }
 
-impl Display for Decl {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match &self.node {
-            DeclKind::FunDecl {
-                name,
-                generics,
-                parameters,
-                return_type,
-                body,
-                inferred_parameters,
-                inferred_return_type,
-            } => {
-                write!(f, "fn {}", name)?;
-
-                if !generics.is_empty() {
-                    write!(f, "<")?;
-                    let generics: Vec<String> = generics.iter().map(|x| x.to_string()).collect();
-                    write!(f, "{}", generics.join(", "))?;
-                    write!(f, ">")?;
-                }
-
-                let params: Vec<String> = if let Some(inferred_parameters) = inferred_parameters {
-                    inferred_parameters
-                        .iter()
-                        .zip(parameters)
-                        .map(|(ty, name)| format!("{}: {}", name.name, ty))
-                        .collect()
-                } else {
-                    parameters.iter().map(|x| x.to_string()).collect()
-                };
-                write!(f, "({})", params.join(", "))?;
-                if let Some(t) = inferred_return_type {
-                    write!(f, ": {}", t)?;
-                } else if let Some(t) = return_type {
-                    write!(f, ": {}", t)?;
-                }
-
-                write!(f, " = {}", body)
-            }
-            DeclKind::StructDecl { .. } => todo!(),
-            DeclKind::EnumDecl {
-                name,
-                variants,
-                generics,
-            } => {
-                write!(f, "enum {}", name)?;
-                let generics = generics
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                if !generics.is_empty() {
-                    write!(f, "<{}>", generics)?;
-                }
-
-                write!(f, " {{")?;
-                let variants = variants
-                    .iter()
-                    .map(|variant| {
-                        let fields = variant
-                            .fields
-                            .iter()
-                            .map(|x| x.to_string())
-                            .collect::<Vec<String>>()
-                            .join(", ");
-                        format!("{}({})", variant.name, fields)
-                    })
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "{}", variants)?;
-                write!(f, "}}")
-            }
-            DeclKind::TraitDecl { .. } => todo!(),
-        }
-    }
-}
-
-impl Display for Expr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.node)
-    }
-}
-
-impl<A, B> Display for ExprKind<A, B>
-where
-    A: Display,
-    B: Display,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExprKind::Unit => write!(f, "()"),
-            ExprKind::Int(x) => write!(f, "{}", x),
-            ExprKind::Boolean(x) => write!(f, "{}", x),
-            ExprKind::Char(x) => write!(f, "{}", x),
-            ExprKind::Identifier(x) => write!(f, "{}", x),
-            ExprKind::Compound(stmts, expr) => {
-                write!(f, "{{ ")?;
-                for stmt in stmts {
-                    write!(f, "{}; ", stmt)?;
-                }
-                write!(f, "{} ", expr)?;
-                write!(f, "}}")
-            }
-            ExprKind::FunCall { target, args } => {
-                write!(f, "{}", target)?;
-                write!(f, "(")?;
-                let mut first = true;
-
-                for arg in args {
-                    if first {
-                        first = false;
-                    } else {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", arg)?;
-                }
-
-                write!(f, ")")
-            }
-            ExprKind::If { cond, then, els } => {
-                write!(f, "if {} {{ {} }} else {{ {} }}", cond, then, els)
-            }
-            ExprKind::Binary { op, lhs, rhs } => {
-                write!(f, "({} {} {})", lhs, op, rhs)
-            }
-            ExprKind::Match { target, arms } => {
-                write!(f, "match {} {{", target)?;
-                let arms = arms
-                    .iter()
-                    .map(|arm| arm.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "{}", arms)?;
-                write!(f, "}}")
-            }
-            ExprKind::StructInitializer {
-                name,
-                fields,
-                generics,
-            } => {
-                let generics = generics
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                let generics = if generics.is_empty() {
-                    "".to_string()
-                } else {
-                    format!("[{}]", generics)
-                };
-                let fields = fields
-                    .iter()
-                    .map(|(field, expr)| format!("{}: {}", field, expr))
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "{}{} {{ {} }}", name, generics, fields)
-            }
-            ExprKind::MemberAccess { target, member } => {
-                write!(f, "{}.{}", target, member)
-            }
-        }
-    }
-}
-
-impl Display for Stmt {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.node)
-    }
-}
-
-impl Display for StmtKind {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StmtKind::VarDecl(decl) => {
-                write!(f, "let {}", decl.name)?;
-                if let Some(inferred_ty) = &decl.inferred_ty {
-                    write!(f, ": {}", inferred_ty)?;
-                } else if let Some(ty) = &decl.ty {
-                    write!(f, ": {}", ty)?;
-                }
-                write!(f, " = {}", decl.value)
-            }
-            StmtKind::Expr(expr) => write!(f, "{}", expr),
-        }
-    }
-}
-
-impl<T> Display for MatchArm<T>
-where
-    T: Display,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "case {} => {}", self.pattern, self.body)
-    }
-}
-
-impl Display for Operator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Operator::Mul => " * ".fmt(f),
-            Operator::Div => " / ".fmt(f),
-            Operator::Add => " + ".fmt(f),
-            Operator::Sub => " - ".fmt(f),
-            Operator::Mod => " % ".fmt(f),
-            Operator::Less => " < ".fmt(f),
-            Operator::Greater => " > ".fmt(f),
-            Operator::LessEqual => " <= ".fmt(f),
-            Operator::GreaterEqual => " >= ".fmt(f),
-            Operator::Equal => " == ".fmt(f),
-            Operator::Neq => " != ".fmt(f),
-        }
-    }
-}
-
-// Untyped
-
 #[derive(Clone, Debug)]
 pub struct VarDecl {
     pub name: String,
@@ -428,29 +212,42 @@ pub struct TypedModule {
 }
 
 #[derive(Clone, Debug)]
+pub struct FunDecl {
+    pub name: String,
+    pub generics: Vec<GenericDeclaration>,
+    pub parameters: Vec<WeaklyTypedIdentifier>,
+    pub inferred_parameters: Option<Vec<Rc<InferredType>>>,
+    pub return_type: Option<WrittenType>,
+    pub inferred_return_type: Option<Rc<InferredType>>,
+    pub body: Box<Expr>,
+}
+
+#[derive(Clone, Debug)]
 pub enum DeclKind {
-    FunDecl {
-        name: String,
-        generics: Vec<GenericDeclaration>,
-        parameters: Vec<WeaklyTypedIdentifier>,
-        inferred_parameters: Option<Vec<Rc<InferredType>>>,
-        return_type: Option<WrittenType>,
-        inferred_return_type: Option<Rc<InferredType>>,
-        body: Box<Expr>,
-    },
+    FunDecl(FunDecl),
     StructDecl {
         name: String,
         generics: Vec<GenericDeclaration>,
         fields: Vec<StronglyTypedIdentifier>,
+        /// This starts out empty when parsing, but is filled
+        /// from the ImplDecl when typechecking.
+        methods: Vec<FunDecl>,
     },
     EnumDecl {
         name: String,
         variants: Vec<EnumVariant>,
         generics: Vec<GenericDeclaration>,
+        /// Same as StructDecl methods.
+        methods: Vec<FunDecl>,
     },
     TraitDecl {
         name: String,
         methods: Vec<WeaklyTypedIdentifier>,
+    },
+    ImplDecl {
+        target: String,
+        generics: Vec<GenericDeclaration>,
+        methods: Vec<FunDecl>,
     },
 }
 
@@ -461,24 +258,30 @@ pub struct TypedDecl {
 }
 
 #[derive(Clone, Debug)]
+pub struct TypedFunDecl {
+    pub name: String,
+    pub parameters: Vec<TypedIdentifier>,
+    pub return_type: InstantiatedType,
+    pub body: Box<TypedExpr>,
+}
+
+#[derive(Clone, Debug)]
 pub enum TypedDeclKind {
-    FunDecl {
-        name: String,
-        parameters: Vec<TypedIdentifier>,
-        return_type: InstantiatedType,
-        body: Box<TypedExpr>,
-    },
+    FunDecl(TypedFunDecl),
     VarDecl(TypedVarDecl),
     StructDecl {
         name: String,
         fields: Vec<TypedIdentifier>,
+        methods: Vec<TypedFunDecl>,
     },
     // Enum decls are important when interpreting,
     // because each variant is a constructor (function).
     EnumDecl {
         name: String,
         variants: Vec<EnumVariant>,
+        methods: Vec<TypedFunDecl>,
     },
+    // TODO: Isn't this useless?
     VariantConstructor {
         name: String,
         // We don't need types here, because they are already
@@ -636,7 +439,65 @@ impl Decl {
         f_stmt: &impl Fn(Stmt) -> Result<Stmt, E>,
         f_expr: &impl Fn(Expr) -> Result<Expr, E>,
     ) -> Result<Self, E> {
-        if let DeclKind::FunDecl {
+        match self.node {
+            DeclKind::FunDecl(fun) => {
+                let body = Box::new(fun.body.fold(f_decl, f_stmt, f_expr)?);
+                self.node = DeclKind::FunDecl(FunDecl { body, ..fun });
+            }
+            DeclKind::StructDecl {
+                name,
+                generics,
+                fields,
+                methods,
+            } => {
+                let methods = methods
+                    .into_iter()
+                    .map(|fundecl| {
+                        Ok(FunDecl {
+                            body: Box::new(fundecl.body.fold(f_decl, f_stmt, f_expr)?),
+                            ..fundecl
+                        })
+                    })
+                    .collect::<Result<Vec<_>, E>>()?;
+                self.node = DeclKind::StructDecl {
+                    name,
+                    generics,
+                    fields,
+                    methods,
+                };
+            }
+            DeclKind::EnumDecl {
+                name,
+                variants,
+                generics,
+                methods,
+            } => {
+                let methods = methods
+                    .into_iter()
+                    .map(|fundecl| {
+                        Ok(FunDecl {
+                            body: Box::new(fundecl.body.fold(f_decl, f_stmt, f_expr)?),
+                            ..fundecl
+                        })
+                    })
+                    .collect::<Result<Vec<_>, E>>()?;
+                self.node = DeclKind::EnumDecl {
+                    name,
+                    variants,
+                    generics,
+                    methods,
+                };
+            }
+            DeclKind::TraitDecl { name, methods } => {
+                unimplemented!("Traits are not yet implemented")
+            }
+            DeclKind::ImplDecl {
+                target,
+                generics,
+                methods,
+            } => todo!(),
+        }
+        if let DeclKind::FunDecl(FunDecl {
             name,
             generics,
             parameters,
@@ -644,10 +505,10 @@ impl Decl {
             return_type,
             inferred_return_type,
             body,
-        } = self.node
+        }) = self.node
         {
             let body = Box::new(body.fold(f_decl, f_stmt, f_expr)?);
-            self.node = DeclKind::FunDecl {
+            self.node = DeclKind::FunDecl(FunDecl {
                 name,
                 generics,
                 parameters,
@@ -655,7 +516,7 @@ impl Decl {
                 return_type,
                 inferred_return_type,
                 body,
-            };
+            });
         }
         f_decl(self)
     }

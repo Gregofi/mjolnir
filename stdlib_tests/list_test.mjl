@@ -1,0 +1,65 @@
+import { Option } from "../stdlib/option.mjl";
+import { List } from "../stdlib/list.mjl";
+import { assert } from "std/internal/native";
+
+fn times_two(n: Int): Int = n * 2
+fn smaller_than_three(n: Int): Bool = n < 3
+fn add(a: Int, b: Int): Int = a + b
+
+fn main(): Int = {
+    let lst = Cons(1, Cons(2, Cons(3, Nil())));
+
+    assert(lst.at(0).is_some());
+    assert(match lst.at(0) {
+        Some(x) if x == 1 => true,
+        _ => false,
+    });
+    assert(match lst.at(1) {
+        Some(x) if x == 2 => true,
+        _ => false,
+    });
+    assert(match lst.at(2) {
+        Some(x) if x == 3 => true,
+        _ => false,
+    });
+    assert(lst.at(3).is_none());
+
+    assert(match lst.appended(4).at(3) {
+        Some(x) if x == 4 => true,
+        _ => false,
+    });
+    assert(match lst.prepended(2).prepended(3).at(1) {
+        Some(x) if x == 2 => true,
+        _ => false,
+    });
+
+    assert(lst.contains(0) == false);
+    assert(lst.contains(1));
+    assert(lst.contains(2));
+    assert(lst.contains(3));
+    assert(lst.contains(4) == false);
+    assert(lst.contains(5) == false);
+
+    let lst2 = lst.map(times_two);
+    assert(lst2.contains(2));
+    assert(lst2.contains(4));
+    assert(lst2.contains(6));
+    assert(lst2.contains(1) == false);
+    assert(lst2.contains(3) == false);
+    assert(lst2.contains(5) == false);
+
+    let lst3 = lst2.filter(smaller_than_three);
+    assert(lst3.contains(2));
+    assert(lst3.contains(3) == false);
+    assert(lst3.contains(4) == false);
+
+    assert(lst.fold_right(0, add) == 6);
+    assert(lst.fold_left(0, add) == 6);
+    let reversed = lst.reverse();
+    assert(match reversed.at(0) {
+        Some(x) if x == 3 => true,
+        _ => false,
+    });
+
+    0
+}

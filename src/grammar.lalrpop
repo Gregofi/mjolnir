@@ -1,4 +1,4 @@
-use crate::ast::{StmtKind, Import, Module, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern};
+use crate::ast::{StmtKind, Import, Module, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern, FunDecl};
 use crate::frontend::utils::{WeaklyTypedIdentifier, StronglyTypedIdentifier, WrittenType, GenericDeclaration, TypeDeclaration};
 use std::str::FromStr;
 
@@ -14,6 +14,7 @@ match {
     ":" => COLON,
     "_" => UNDERSCORE,
     "&" => AMPER,
+    "!" => BANG,
     "->" => RIGHT_ARROW,
     "=>" => FAT_RIGHT_ARROW,
     "||" => OR,
@@ -51,6 +52,7 @@ match {
     "match" => MATCH,
     "import" => IMPORT,
     "from" => FROM,
+    "impl" => IMPL,
     "\"" => DOUBLE_QUOTE,
     "'" => SINGLE_QUOTE,
 
@@ -85,19 +87,38 @@ TopLevelDecl: Decl = {
     FunDecl,
     StructDecl,
     EnumDecl,
+    ImplDecl,
+}
+
+Function: FunDecl = {
+    <l: @L> FN <name: TypeDeclaration> LPAREN <parameters: MaybeTypedIdentifiers> RPAREN <return_type: (COLON <WrittenType>)?> ASSIGN <body: Expr> <r: @R> => FunDecl {
+        name: name.name,
+        parameters,
+        return_type,
+        body: Box::new(body),
+        generics: name.generics,
+        inferred_return_type: None,
+        inferred_parameters: None,
+    },
 }
 
 FunDecl: Decl = {
-    // TODO: Generics in function name
-    <l: @L> FN <name: TypeDeclaration> LPAREN <parameters: MaybeTypedIdentifiers> RPAREN <return_type: (COLON <WrittenType>)?> ASSIGN <body: Expr> <r: @R> => Decl::new(
-        DeclKind::FunDecl {
-            name: name.name,
-            parameters,
-            return_type,
-            body: Box::new(body),
-            generics: name.generics,
-            inferred_return_type: None,
-            inferred_parameters: None,
+    <l: @L> <f: Function> <r: @R> => Decl::new(
+        DeclKind::FunDecl(f),
+        Location::new(l, r),
+    )
+}
+
+Methods: Vec<FunDecl> = {
+    <mut v: (<Function>)*> => { v },
+}
+
+ImplDecl: Decl = {
+    <l: @L> IMPL <typename: TypeDeclaration> LBRACE <methods: Methods> RBRACE <r: @R> => Decl::new(
+        DeclKind::ImplDecl {
+            target: typename.name,
+            generics: typename.generics,
+            methods,
         },
         Location::new(l, r),
     )
@@ -118,6 +139,7 @@ StructDecl: Decl = {
             name: typename.name,
             fields,
             generics: typename.generics,
+            methods: vec![],
         },
         Location::new(l, r),
     )
@@ -142,6 +164,7 @@ EnumDecl: Decl = {
             name: typename.name,
             variants,
             generics: typename.generics,
+            methods: vec![],
         },
         Location::new(l, r),
     )

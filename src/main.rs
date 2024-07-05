@@ -49,9 +49,11 @@ fn main() {
         match interpreter.interpret() {
             Ok(e) => {
                 println!("Program exited with code {}", e);
+                std::process::exit(e.into());
             }
             Err(e) => {
                 println!("Interpreting failed: {}", e);
+                std::process::exit(255);
             }
         }
     } else {

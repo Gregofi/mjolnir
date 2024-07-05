@@ -1,10 +1,19 @@
 import { Option } from "../stdlib/option.mjl";
 import { List, at } from "../stdlib/list.mjl";
+import { assert } from "std/internal/native";
 
 fn main(): Int = {
     let lst = Cons(1, Cons(2, Cons(3, Nil())));
-    match at(lst, 1) {
-        Some(x) => x,
-        None => 0,
-    }
+    let opt = Some(1);
+    let opt2: Option[Int] = None();
+    assert(opt.is_some());
+    assert(opt2.is_none());
+    assert(lst.at(0).is_some());
+    assert(match lst.at(0) {
+        Some(x) if x == 1 => true,
+        _ => false,
+    });
+    assert(lst.at(3).is_none());
+    assert(lst.first());
+    0
 }
