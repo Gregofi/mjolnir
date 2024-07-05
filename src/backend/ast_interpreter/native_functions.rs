@@ -6,7 +6,7 @@ use crate::frontend::type_inference::{Constructor, Type};
 use anyhow::Result;
 use frontend::type_inference::TypeScheme;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NativeFunction {
     pub name: String,
     pub body: fn(Vec<Value>) -> Result<Value>,
@@ -17,20 +17,6 @@ impl NativeFunction {
     pub fn new(name: String, body: fn(Vec<Value>) -> Result<Value>, ty: TypeScheme) -> Self {
         Self { name, body, ty }
     }
-}
-
-fn vec_to_list(v: Vec<Value>) -> Value {
-    let mut list = Value::Variant {
-        name: "Nil".to_string(),
-        fields: Rc::new(vec![]),
-    };
-    for i in (0..v.len()).rev() {
-        list = Value::Variant {
-            name: "Cons".to_string(),
-            fields: Rc::new(vec![v[i].clone(), list]),
-        };
-    }
-    list
 }
 
 impl Type {
@@ -85,32 +71,6 @@ fn native_putchar() -> NativeFunction {
     )
 }
 
-/// needs: stdlib List
-fn native_readln() -> NativeFunction {
-    NativeFunction::new(
-        "readln".to_string(),
-        |args| {
-            if !args.is_empty() {
-                return Err(anyhow::anyhow!("Expected 0 arguments, got {}", args.len()));
-            }
-
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            Ok(vec_to_list(
-                input
-                    .trim_end_matches('\n')
-                    .chars()
-                    .map(|c| Value::Char(c))
-                    .collect(),
-            ))
-        },
-        TypeScheme {
-            generics: vec![],
-            ty: Type::create_function(vec![], Type::create_list("Char".to_string())).into_rc(),
-        },
-    )
-}
-
 fn native_assert() -> NativeFunction {
     NativeFunction::new(
         "assert".to_string(),
@@ -154,10 +114,5 @@ fn native_pow() -> NativeFunction {
 }
 
 pub fn get_native_functions() -> Vec<NativeFunction> {
-    vec![
-        native_assert(),
-        native_pow(),
-        native_putchar(),
-        native_readln(),
-    ]
+    vec![native_assert(), native_pow(), native_putchar()]
 }

@@ -15,7 +15,7 @@
 // TODO: Check if the Rcs are truly necessary.
 use super::utils::{GenericDeclaration, IdEnv, StronglyTypedIdentifier, WrittenType};
 use crate::ast::{
-    Decl, DeclKind, Expr, ExprKind, Import, Module, Operator, Pattern, Stmt, StmtKind, VarDecl,
+    Decl, DeclKind, Expr, ExprKind, FunDecl, Module, Operator, Pattern, Stmt, StmtKind, VarDecl,
 };
 use crate::backend::ast_interpreter::native_functions::get_native_functions;
 use crate::constants::STD_NATIVE_MODULE;
@@ -55,11 +55,11 @@ fn new_typevar() -> Type {
     }))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeVar(usize);
 
 /// Constructors are the types that are defined in the source code. For example, Int, List<T>,
-/// Either<L, R>, etc. Also functions are represented via constructors. Function<ReturnType,
+/// Either<L, R>, etc. Also, functions are represented via constructors. Function<ReturnType,
 /// Args...> Constructor name can be a type variable, so we can represent generic types.
 #[derive(Debug, Clone)]
 pub struct Constructor<T> {
@@ -114,6 +114,8 @@ impl TypeScheme {
         Self { generics, ty }
     }
 
+    /// Returns a type where all generic parameters were replaced by
+    /// fresh type variable.
     fn instantiate(&self) -> Result<Rc<Type>, TypeInferenceError> {
         let generic_map = self
             .generics
@@ -179,24 +181,13 @@ impl Type {
         })
     }
 
-    /// Returns the return type of a function, if the type is a function.
-    /// For example, Function<Int, Bool> will return Some("Int").
-    pub fn get_return_type(&self) -> Option<String> {
-        match self {
-            Type::Constructor(cons) if cons.name == "Function" => {
-                match cons.type_vec.get(0).unwrap().as_ref() {
-                    Type::Constructor(cons) => Some(cons.name.clone()),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
     /// Creates a new type where every occurence of each variable in map is replaced.
-    /// If the type is a constructor which name matches the name in map,
-    /// the replacement cannot be performed and error will be returned.
-    /// (T<Q>, { T -> CustomType }) => CustomType<Q> will result in an error.
+    /// This is mainly targeted for filling generic variables. For example:
+    /// (T<Q>, { T -> Int }) => Int<Q>
+    ///
+    /// If the type is a constructor with parameters which name matches the name in map, the
+    /// replacement cannot be performed and error will be returned. (T<Q>, { T -> CustomType }) =>
+    /// CustomType<Q> will result in an error.
     pub fn fill_types(
         &self,
         map: &HashMap<String, Rc<Type>>,
@@ -240,7 +231,8 @@ impl WrittenType {
 #[derive(Debug, Clone)]
 struct StructMetadata {
     generics: Vec<String>,
-    fields: Vec<(String, Type)>,
+    fields: HashMap<String, Type>,
+    methods: HashMap<String, TypeScheme>,
 }
 
 impl StructMetadata {
@@ -277,6 +269,8 @@ enum TypeMetadata {
     /// so that we know what functions to export.
     Enum {
         variant_names: Vec<String>,
+        methods: HashMap<String, TypeScheme>,
+        generics: Vec<String>,
     },
 }
 
@@ -299,18 +293,25 @@ impl SymbolTable {
     fn unify(&mut self, t1: &Rc<Type>, t2: &Rc<Type>) -> Result<(), TypeInferenceError> {
         debug!("Unifying ⟦{}⟧ = ⟦{}⟧", t1, t2);
         match (t1.as_ref(), t2.as_ref()) {
-            (Type::TypeVar(tv), other) | (other, Type::TypeVar(tv)) => {
+            // This is a quick fix, some programs would cause an unification of T?1 = T?1,
+            // which would cause an infinite loop.
+            (Type::TypeVar(x), Type::TypeVar(y)) if x == y => {},
+            (Type::TypeVar(tv), _) => {
                 let t = self.unif_table.get(tv);
-                let other = if std::ptr::eq(other, t1.as_ref()) {
-                    t1
-                } else {
-                    t2
-                };
                 if let Some(t) = t {
-                    self.unify(&t.clone(), other)?;
+                    debug!("Unifying type {} variable with type {}", t, t2);
+                    self.unify(&t.clone(), t2)?;
                 }
 
-                self.unif_table.insert(tv.clone(), other.clone());
+                self.unif_table.insert(*tv, t2.clone());
+            }
+            (_, Type::TypeVar(tv)) => {
+                let t = self.unif_table.get(tv);
+                if let Some(t) = t {
+                    self.unify(&t.clone(), t1)?;
+                }
+
+                self.unif_table.insert(*tv, t1.clone());
             }
             (Type::Constructor(c1), Type::Constructor(c2)) if c1.name == c2.name => {
                 for (t1, t2) in c1.type_vec.iter().zip(c2.type_vec.iter()) {
@@ -335,59 +336,84 @@ impl SymbolTable {
         }
     }
 
+    /// Performs type inference upon the function body and returns the inferred type of the
+    /// function.
+    fn visit_function(
+        &mut self,
+        FunDecl {
+            name,
+            generics,
+            parameters,
+            inferred_parameters,
+            return_type,
+            inferred_return_type,
+            body,
+        }: &mut FunDecl,
+    ) -> Result<Type, TypeInferenceError> {
+        // TODO: This is weird, we should probably push env here.
+        // Additionally, check if we don't do things twice (here and in the precollect step)
+        debug!("Visiting function {}", name);
+        let mut typed_params = vec![];
+        for param in parameters {
+            let ty = param
+                .ty
+                .clone()
+                .map(|ty| ty.into_type())
+                .unwrap_or_else(new_typevar)
+                .into_rc();
+            self.ids
+                .insert(param.name.clone(), (*ty).clone().into_scheme());
+            typed_params.push(ty);
+        }
+
+        let ret_ty_stated = return_type
+            .clone()
+            .map(|ty| ty.into_type())
+            .unwrap_or_else(new_typevar)
+            .into_rc();
+
+        let fun_ty = Type::create_function(typed_params.clone(), ret_ty_stated.clone());
+
+        *inferred_return_type = Some(ret_ty_stated.clone());
+        *inferred_parameters = Some(typed_params.clone());
+        let fun_scheme = TypeScheme::create_function(generics.to_vec(), fun_ty.clone().into_rc());
+
+        debug!("Adding function {} with type {}", name, fun_ty);
+        self.ids.insert(name.clone(), fun_scheme);
+
+        // Visiting the function body must be done at the
+        // end, when we have all the types in the symbol table.
+        // Otherwise, recursive functions will not work.
+        let ret_ty = self.visit_expr(body)?;
+        self.unify(&ret_ty_stated, &ret_ty)?;
+
+        Ok(fun_ty.clone())
+    }
+
+    fn visit_method(
+        &mut self,
+        target_type: Rc<Type>,
+        method: &mut FunDecl,
+    ) -> Result<(), TypeInferenceError> {
+        self.ids.push();
+        self.ids
+            .insert("self".to_string(), (*target_type).clone().into_scheme());
+        self.visit_function(method)?;
+        self.ids.pop();
+        Ok(())
+    }
+
     fn visit_decl(&mut self, decl: &mut Decl) -> Result<(), TypeInferenceError> {
         match &mut decl.node {
-            DeclKind::FunDecl {
-                name,
-                generics,
-                parameters,
-                return_type,
-                body,
-                inferred_parameters,
-                inferred_return_type,
-            } => {
-                debug!("Visiting function {}", name);
-                let mut typed_params = vec![];
-                for param in parameters {
-                    let ty = param
-                        .ty
-                        .clone()
-                        .map(|ty| ty.into_type())
-                        .unwrap_or_else(new_typevar)
-                        .into_rc();
-                    self.ids
-                        .insert(param.name.clone(), (*ty).clone().into_scheme());
-                    typed_params.push(ty);
-                }
-
-                let ret_ty_stated = return_type
-                    .clone()
-                    .map(|ty| ty.into_type())
-                    .unwrap_or_else(new_typevar)
-                    .into_rc();
-
-                let fun_ty = Type::create_function(typed_params.clone(), ret_ty_stated.clone());
-
-                *inferred_return_type = Some(ret_ty_stated.clone());
-                *inferred_parameters = Some(typed_params.clone());
-                let fun_scheme =
-                    TypeScheme::create_function(generics.to_vec(), fun_ty.clone().into_rc());
-
-                debug!("Adding function {} with type {}", name, fun_ty);
-                self.ids.insert(name.clone(), fun_scheme);
-
-                // Visiting the function body must be done at the
-                // end, when we have all the types in the symbol table.
-                // Otherwise recursive functions will not work.
-                let ret_ty = self.visit_expr(body)?;
-                self.unify(&ret_ty_stated, &ret_ty)?;
-
-                decl.inferred_ty = Some(fun_ty.clone());
+            DeclKind::FunDecl(fun) => {
+                let fun_ty = self.visit_function(fun)?;
+                decl.inferred_ty = Some(fun_ty);
             }
             DeclKind::EnumDecl {
                 name,
                 variants,
                 generics,
+                methods,
             } => {
                 // The return type of the variant constructors. This needn't be a type scheme
                 // since the functions will be type schemes.
@@ -400,6 +426,7 @@ impl SymbolTable {
                 })
                 .into_rc();
 
+                // TODO: Shouldn't this be done in the precollect step?
                 // Add the variants as function types
                 for variant in variants {
                     let fields: Vec<Rc<Type>> = variant
@@ -414,9 +441,31 @@ impl SymbolTable {
                     };
                     self.ids.insert(variant.name.clone(), fun_ty);
                 }
+
+                for method in methods {
+                    self.visit_method(enum_ty.clone(), method)?;
+                }
             }
-            DeclKind::StructDecl { .. } => {
-                // noop, collecting happens before actual type inference
+            DeclKind::StructDecl {
+                name,
+                methods,
+                generics,
+                ..
+            } => {
+                let type_ = Type::Constructor(Constructor {
+                    name: name.clone(),
+                    type_vec: generics
+                        .iter()
+                        .map(|g| Type::create_constant(g.name.clone()))
+                        .collect(),
+                })
+                .into_rc();
+                for method in methods {
+                    self.visit_method(type_.clone(), method)?;
+                }
+            }
+            DeclKind::ImplDecl { .. } => {
+                unreachable!("This should have been already removed")
             }
             _ => todo!(),
         }
@@ -608,40 +657,43 @@ impl SymbolTable {
                     }
                 };
 
-                let struct_metadata = match self.type_ids.get(&cons.name) {
-                    Some(TypeMetadata::Struct(metadata)) => metadata,
+                // Try to extract the member as a field or a method
+                let (members, methods, generics) = match self.type_ids.get(&cons.name) {
+                    Some(TypeMetadata::Struct(StructMetadata {
+                        generics,
+                        fields,
+                        methods,
+                    })) => (fields, methods, generics),
+                    Some(TypeMetadata::Enum {
+                        methods, generics, ..
+                    }) => (&HashMap::new(), methods, generics),
                     _ => {
                         return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Struct {} not found when accessing member {}",
+                            "Target type {} not found when accessing member {}",
                             cons.name, member
                         )))
                     }
                 };
 
-                let member = match struct_metadata
-                    .fields
-                    .iter()
-                    .find(|(name, _)| name == member)
-                {
-                    Some((_, ty)) => ty.clone().into_rc(),
-                    None => {
-                        return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Field {} not found in struct {}",
-                            member, cons.name
-                        )))
-                    }
+                let member_type = if let Some(ty) = members.get(member) {
+                    ty.clone().into_rc()
+                } else if let Some(ty) = methods.get(member) {
+                    ty.instantiate()?
+                } else {
+                    return Err(TypeInferenceError::TypeMismatch(format!(
+                        "Member {} not found in struct {}",
+                        member, cons.name
+                    )));
                 };
 
-                let types = struct_metadata
-                    .generics
-                    .iter()
-                    .zip(cons.type_vec.iter())
-                    .fold(HashMap::new(), |mut map, (g, t)| {
+                let types = generics.iter().zip(cons.type_vec.iter()).fold(
+                    HashMap::new(),
+                    |mut map, (g, t)| {
                         map.insert(g.clone(), t.clone());
                         map
-                    });
-
-                member.fill_types(&types)
+                    },
+                );
+                member_type.fill_types(&types)
             }
         }?;
         expr.inferred_ty = Some(res.clone());
@@ -651,20 +703,24 @@ impl SymbolTable {
     /// Collects types from an imported module into the current symbol table.
     /// Returns the symbol table with the imported types.
     fn collect_from_import(&mut self, imported_ids: &[&str], imported_module: &ModuleMetadata) {
+        debug!("Collecting from import: {}", imported_ids.join(", "));
         for id in imported_ids {
+            // For functions
             if let Some(ty) = imported_module.ids.get(*id) {
                 self.ids.insert(id.to_string(), ty.clone());
+            // Others (structs, enums)
             } else if let Some(ty) = imported_module.types.get(*id) {
                 match ty {
                     TypeMetadata::Struct(metadata) => {
                         self.type_ids
                             .insert(id.to_string(), TypeMetadata::Struct(metadata.clone()));
                     }
-                    TypeMetadata::Enum { variant_names } => {
+                    TypeMetadata::Enum { variant_names, .. } => {
                         for variant in variant_names {
                             let cons = imported_module.ids.get(variant).expect("Inner compiler error; Couldn't find variant constructor which should be exported");
                             self.ids.insert(variant.clone(), cons.clone());
                         }
+                        self.type_ids.insert(id.to_string(), ty.clone());
                     }
                 }
             }
@@ -794,6 +850,18 @@ impl SymbolTable {
                 Ok(())
             }
             (Pattern::Identifier(name), ty) => {
+                // `match self { None => ... }` is a special case.
+                // The `None` is treated as a variant if the constructor
+                // exists in scope.
+                if self.ids.get(name).is_some() {
+                    return self.unify_pattern(
+                        &Rc::new(Pattern::Enum {
+                            name: name.clone(),
+                            patterns: vec![],
+                        }),
+                        target_ty,
+                    );
+                }
                 self.ids.insert(name.clone(), (*ty).clone().into_scheme());
                 Ok(())
             }
@@ -826,34 +894,63 @@ impl SymbolTable {
         }
     }
 
+    fn finalize_fun(&mut self, fun_decl: FunDecl) -> Result<FunDecl, TypeInferenceError> {
+        let closed_params = fun_decl
+            .inferred_parameters
+            .expect("Finalize must be done after types are inferred")
+            .into_iter()
+            .map(|t| self.close_type(&t))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let closed_return_type = self.close_type(
+            &fun_decl
+                .inferred_return_type
+                .expect("Finalize must be done after types are inferred"),
+        )?;
+        Ok(FunDecl {
+            inferred_parameters: Some(closed_params),
+            inferred_return_type: Some(closed_return_type),
+            ..fun_decl
+        })
+    }
+
     fn finalize_decl(&mut self, decl: Decl) -> Result<Decl, TypeInferenceError> {
         let node = match decl.node {
-            DeclKind::FunDecl {
+            DeclKind::FunDecl(fun_decl) => DeclKind::FunDecl(self.finalize_fun(fun_decl)?),
+            DeclKind::StructDecl {
+                methods,
                 name,
                 generics,
-                parameters,
-                inferred_parameters,
-                return_type,
-                inferred_return_type,
-                body,
+                fields,
             } => {
-                let closed_params = inferred_parameters
-                    .expect("Finalize must be done after types are inferred")
+                debug!("Finalizing struct {}", name);
+                let methods = methods
                     .into_iter()
-                    .map(|t| self.close_type(&t))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let closed_return_type = self.close_type(
-                    &inferred_return_type.expect("Finalize must be done after types are inferred"),
-                )?;
-                DeclKind::FunDecl {
+                    .map(|method| self.finalize_fun(method))
+                    .collect::<Result<_, _>>()?;
+                DeclKind::StructDecl {
+                    methods,
                     name,
                     generics,
-                    parameters,
-                    inferred_parameters: Some(closed_params),
-                    return_type,
-                    inferred_return_type: Some(closed_return_type),
-                    body,
+                    fields,
+                }
+            }
+            DeclKind::EnumDecl {
+                name,
+                variants,
+                generics,
+                methods,
+            } => {
+                debug!("Finalizing enum {}", name);
+                let methods: Vec<_> = methods
+                    .into_iter()
+                    .map(|method| self.finalize_fun(method))
+                    .collect::<Result<_, _>>()?;
+                DeclKind::EnumDecl {
+                    name,
+                    variants,
+                    generics,
+                    methods,
                 }
             }
             _ => decl.node,
@@ -890,6 +987,109 @@ impl SymbolTable {
     }
 }
 
+impl FunDecl {
+    fn to_typescheme(&self) -> Result<TypeScheme, TypeInferenceError> {
+        let mut typed_params = vec![];
+        for param in &self.parameters {
+            let ty = param
+                .ty
+                .clone()
+                .ok_or(TypeInferenceError::TypeExpected(
+                    "Function parameter".to_string(),
+                ))?
+                .into_type()
+                .into_rc();
+            typed_params.push(ty.clone());
+        }
+
+        let ret_ty_stated = self
+            .return_type
+            .clone()
+            .ok_or(TypeInferenceError::TypeExpected(
+                "Function return type".to_string(),
+            ))?
+            .into_type()
+            .into_rc();
+
+        let ty = Type::create_function(typed_params.clone(), ret_ty_stated.clone());
+
+        Ok(TypeScheme::create_function(
+            self.generics.to_vec(),
+            ty.into_rc(),
+        ))
+    }
+}
+
+/// Fills the methods with the struct and enum nodes from the Impl blocks.
+/// Those blocks are not returned (they are effectively filtered out).
+fn fill_methods(module: Module) -> Result<Module, TypeInferenceError> {
+    // First, collect all the impls
+    let mut impls = HashMap::<_, Vec<FunDecl>>::new();
+    let mut rest = vec![];
+    for decl in module.decls {
+        match decl.node {
+            DeclKind::ImplDecl {
+                target, methods, ..
+            } => {
+                let exists = impls.insert(target.clone(), methods);
+                if exists.is_some() {
+                    return Err(TypeInferenceError::TypeMismatch(format!(
+                        "Multiple impl blocks for struct {}",
+                        target
+                    )));
+                }
+            }
+            _ => rest.push(decl),
+        }
+    }
+
+    let transformed = rest
+        .into_iter()
+        .map(|decl| match decl.node {
+            DeclKind::StructDecl {
+                name,
+                generics,
+                fields,
+                ..
+            } => {
+                let methods = impls.remove(&name).unwrap_or(vec![]);
+                Ok(Decl {
+                    node: DeclKind::StructDecl {
+                        methods,
+                        name,
+                        generics,
+                        fields,
+                    },
+                    ..decl
+                })
+            }
+            DeclKind::EnumDecl {
+                name,
+                variants,
+                generics,
+                ..
+            } => {
+                let methods = impls.remove(&name).unwrap_or(vec![]);
+                Ok(Decl {
+                    node: DeclKind::EnumDecl {
+                        name,
+                        variants,
+                        generics,
+                        methods,
+                    },
+                    ..decl
+                })
+            }
+            _ => Ok(decl),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Module {
+        decls: transformed,
+        imports: module.imports,
+    })
+}
+
 /// Traverse over module and collect all top types and identifiers.
 fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceError> {
     let mut module_metadata = ModuleMetadata {
@@ -903,65 +1103,45 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
                 name,
                 fields,
                 generics,
+                methods,
             } => {
-                let fields: Vec<_> = fields
+                let fields: HashMap<_, _> = fields
                     .iter()
                     .map(|StronglyTypedIdentifier { name, ty }| {
                         (name.clone(), ty.clone().into_type())
                     })
                     .collect();
 
+                let methods = methods
+                    .iter()
+                    .map(|method| Ok((method.name.clone(), method.to_typescheme()?)))
+                    .collect::<Result<HashMap<_, _>, _>>()?;
+
                 module_metadata.types.insert(
                     name.clone(),
                     TypeMetadata::Struct(StructMetadata {
                         generics: generics.iter().map(|g| g.name.clone()).collect(),
                         fields,
+                        methods,
                     }),
                 );
             }
-            DeclKind::FunDecl {
-                name,
-                generics,
-                parameters,
-                return_type,
-                ..
-            } => {
-                let mut typed_params = vec![];
-                for param in parameters {
-                    let ty = param
-                        .ty
-                        .clone()
-                        .ok_or(TypeInferenceError::TypeExpected(
-                            "Function parameter".to_string(),
-                        ))?
-                        .into_type()
-                        .into_rc();
-                    typed_params.push(ty.clone());
-                    module_metadata
-                        .ids
-                        .insert(param.name.clone(), (*ty).clone().into_scheme());
-                }
+            DeclKind::ImplDecl { .. } => {
+                unreachable!("Impl blocks should be removed by now");
+            }
+            DeclKind::FunDecl(fun) => {
+                let name = fun.name.clone();
 
-                let ret_ty_stated = return_type
-                    .clone()
-                    .ok_or(TypeInferenceError::TypeExpected(
-                        "Function return type".to_string(),
-                    ))?
-                    .into_type()
-                    .into_rc();
+                let fun_typescheme = fun.to_typescheme()?;
 
-                let fun_ty = Type::create_function(typed_params.clone(), ret_ty_stated.clone());
-
-                let fun_scheme =
-                    TypeScheme::create_function(generics.to_vec(), fun_ty.clone().into_rc());
-
-                debug!("Adding function {} with type {}", name, fun_ty);
-                module_metadata.ids.insert(name.clone(), fun_scheme);
+                debug!("Adding function {} with type {}", name, fun_typescheme.ty);
+                module_metadata.ids.insert(name.clone(), fun_typescheme);
             }
             DeclKind::EnumDecl {
                 name,
                 variants,
                 generics,
+                methods,
             } => {
                 // The return type of the variant constructors. This needn't be a type scheme
                 // since the functions will be type schemes.
@@ -994,6 +1174,11 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
                     name.clone(),
                     TypeMetadata::Enum {
                         variant_names: variants.iter().map(|v| v.name.clone()).collect(),
+                        methods: methods
+                            .iter()
+                            .map(|method| Ok((method.name.clone(), method.to_typescheme()?)))
+                            .collect::<Result<HashMap<_, _>, _>>()?,
+                        generics: generics.iter().map(|g| g.name.clone()).collect(),
                     },
                 );
             }
@@ -1006,8 +1191,14 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
 /// Performs type inference.
 /// Returns the same decls with the inferred types filled.
 pub fn type_infer_modules(
-    mut modules: HashMap<String, Module>,
+    modules: HashMap<String, Module>,
 ) -> Result<HashMap<String, Module>, TypeInferenceError> {
+    // Move methods from 'Impl' blocks into the structures
+    let modules = modules
+        .into_iter()
+        .map(|(name, module)| Ok((name, fill_methods(module)?)))
+        .collect::<Result<HashMap<_, _>, _>>()?;
+
     // First, we need to collect all the types from all the modules.
     let mut module_metadata = modules
         .iter()
@@ -1059,6 +1250,7 @@ pub fn type_infer_modules(
 
             // Do the actual type inference
             for decl in &mut module.decls {
+                // TODO: Shouldn't we push a new scope here?
                 symbol_table.borrow_mut().visit_decl(decl)?;
             }
 
@@ -1632,5 +1824,61 @@ fn main(): Int = {
 
         assert!(decls.len() == 1);
         assert!(decls[0].to_string().contains("let x: Int"));
+    }
+
+    #[test]
+    fn test_methods() {
+        init();
+        let decls = infer_module(
+            "
+enum Option[T] {
+    Some(T),
+    None,
+}
+
+impl Option[T] {
+    fn is_some(): Bool = match self {
+        Some(_) => true,
+        None => false,
+    }
+
+    fn is_none(): Bool = {
+        let self_alias = self;
+        self_alias.is_some() == false
+    }
+
+    fn map[U](f: (T) => U): Option[U] = match self {
+        Some(x) => Some(f(x)),
+        None => None(),
+    }
+}
+
+fn is_odd(x: Int): Bool = x % 2 == 1
+
+fn main(): Int = {
+    let x = Some(1);
+    let y = x.is_some();
+    let z = x.is_none();
+    let odd = x.map(is_odd);
+    0
+}
+").unwrap();
+
+        assert_eq!(decls.len(), 3);
+        if let DeclKind::EnumDecl{ name, variants, generics, methods } = &decls[0].node {
+            assert_eq!(name, "Option");
+            assert_eq!(variants.len(), 2);
+            assert_eq!(generics.len(), 1);
+            assert_eq!(methods.len(), 3);
+
+            let is_none = methods.iter().find(|m| m.name == "is_none").unwrap();
+            assert!(is_none.body.to_string().contains("let self_alias: Option[T] = self;"));
+        } else {
+            panic!("Expected EnumDecl")
+        }
+        assert!(decls[2].to_string().contains("let x: Option[Int] = Some(1);"));
+        assert!(decls[2].to_string().contains("let y: Bool = x.is_some();"));
+        assert!(decls[2].to_string().contains("let z: Bool = x.is_none();"));
+        assert!(decls[2].to_string().contains("let odd: Option[Bool] = x.map(is_odd);"));
     }
 }

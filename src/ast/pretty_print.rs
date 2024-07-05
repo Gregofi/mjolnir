@@ -23,19 +23,65 @@ fn print_spaces(f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
     write!(f, "{}", " ".repeat(spaces as usize))
 }
 
+impl PrettyPrint for FunDecl {
+    fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
+        let FunDecl {
+            name,
+            generics,
+            inferred_parameters,
+            return_type,
+            inferred_return_type,
+            body,
+            ..
+        } = self;
+        write!(f, "fn {}", name)?;
+        let generics = generics
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+        if !generics.is_empty() {
+            write!(f, "[{}]", generics)?;
+        }
+
+        write!(f, "(")?;
+        let parameters = inferred_parameters
+            .iter()
+            .map(|p| {
+                p.iter()
+                    .map(|r| r.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+        write!(f, "{}", parameters)?;
+        write!(f, ")")?;
+
+        if let Some(t) = inferred_return_type {
+            write!(f, ": {} = ", t)?;
+        } else if let Some(return_type) = return_type {
+            write!(f, ": {} = ", return_type)?;
+        }
+
+        body.pretty_print(f, spaces + 4)?;
+        Ok(())
+    }
+}
+
 impl PrettyPrint for DeclKind {
     fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
         match self {
-            DeclKind::FunDecl {
-                name,
+            DeclKind::FunDecl(fd) => {
+                fd.pretty_print(f, spaces)?;
+                Ok(())
+            }
+            DeclKind::ImplDecl {
+                target,
                 generics,
-                inferred_parameters,
-                return_type,
-                inferred_return_type,
-                body,
-                ..
+                methods,
             } => {
-                write!(f, "fn {}", name)?;
+                write!(f, "impl {}", target)?;
                 let generics = generics
                     .iter()
                     .map(|g| g.to_string())
@@ -45,33 +91,19 @@ impl PrettyPrint for DeclKind {
                     write!(f, "[{}]", generics)?;
                 }
 
-                write!(f, "(")?;
-                let parameters = inferred_parameters
-                    .iter()
-                    .map(|p| {
-                        p.iter()
-                            .map(|r| r.to_string())
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    })
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "{}", parameters)?;
-                write!(f, ")")?;
-
-                if let Some(t) = inferred_return_type {
-                    write!(f, ": {} = ", t)?;
-                } else if let Some(return_type) = return_type {
-                    write!(f, ": {} = ", return_type)?;
+                writeln!(f, " {{")?;
+                for method in methods {
+                    print_spaces(f, spaces + 4)?;
+                    method.pretty_print(f, spaces + 4);
+                    writeln!(f)?;
                 }
-
-                body.pretty_print(f, spaces + 4)?;
-                Ok(())
+                write!(f, "}}")
             }
             DeclKind::StructDecl {
                 name,
                 generics,
                 fields,
+                ..
             } => {
                 write!(f, "struct {}", name)?;
                 let generics = generics
@@ -94,6 +126,7 @@ impl PrettyPrint for DeclKind {
                 name,
                 variants,
                 generics,
+                ..
             } => {
                 write!(f, "enum {}", name)?;
                 let generics = generics
@@ -122,12 +155,12 @@ impl PrettyPrint for DeclKind {
 impl PrettyPrint for TypedDeclKind {
     fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
         match self {
-            TypedDeclKind::FunDecl {
+            TypedDeclKind::FunDecl(TypedFunDecl {
                 name,
                 parameters,
                 return_type,
                 body,
-            } => {
+            }) => {
                 write!(f, "fn {}(", name)?;
                 let parameters = parameters
                     .iter()
@@ -141,7 +174,7 @@ impl PrettyPrint for TypedDeclKind {
                 write!(f, "let {}: {} = ", name, value.ty)?;
                 value.pretty_print(f, spaces)
             }
-            TypedDeclKind::StructDecl { name, fields } => {
+            TypedDeclKind::StructDecl { name, fields, .. } => {
                 write!(f, "struct {}", name)?;
                 writeln!(f, " {{")?;
                 for TypedIdentifier { name, ty } in fields {
@@ -151,7 +184,7 @@ impl PrettyPrint for TypedDeclKind {
                 }
                 write!(f, "}}")
             }
-            TypedDeclKind::EnumDecl { name, variants } => {
+            TypedDeclKind::EnumDecl { name, variants, .. } => {
                 write!(f, "enum {} {{", name)?;
                 for variant in variants {
                     print_spaces(f, spaces + 4)?;

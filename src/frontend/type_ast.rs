@@ -11,14 +11,13 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::rc::Rc;
 
+use log::debug;
+
 use crate::ast::*;
 use crate::frontend::types::TypeInfo;
 
 use super::type_inference::{Constructor, Type as InferredType};
-use super::types::{
-    BuiltInType, EnumType, EnumVariantType, FunctionType, InstantiatedType, Parameter, StructType,
-    TypeKind,
-};
+use super::types::InstantiatedType;
 use super::utils::{StronglyTypedIdentifier, TypedIdentifier, WrittenType};
 
 #[derive(Debug, Clone)]
@@ -77,41 +76,47 @@ impl InferredType {
     }
 }
 
+impl FunDecl {
+    fn type_ast(self) -> Result<TypedFunDecl, TypeAstError> {
+        debug!("Typing function declaration: {}", self.name);
+
+        let parameters = self
+            .inferred_parameters
+            .expect("Compiler bug: Type inference must be done at this point")
+            .into_iter()
+            .zip(self.parameters)
+            .map(|(ty, param)| {
+                let ty = ty.to_instantiated_type()?;
+                Ok(TypedIdentifier {
+                    name: param.name,
+                    ty,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let return_type = self
+            .inferred_return_type
+            .expect("Compiler bug: Type inference must be done at this point")
+            .to_instantiated_type()?;
+        let body = self.body.type_ast(&HashMap::new())?;
+        Ok(TypedFunDecl {
+            name: self.name,
+            parameters,
+            return_type,
+            body: Box::new(body),
+        })
+    }
+}
+
 impl Decl {
     pub fn type_ast(self) -> Result<TypedDecl, TypeAstError> {
         let typed_kind = match self.node {
-            DeclKind::FunDecl {
+            DeclKind::FunDecl(fun_decl) => TypedDeclKind::FunDecl(fun_decl.type_ast()?),
+            DeclKind::StructDecl {
                 name,
-                inferred_parameters,
-                inferred_return_type,
-                parameters,
-                body,
+                fields,
+                methods,
                 ..
             } => {
-                let parameters = inferred_parameters
-                    .expect("Compiler bug: Type inference must be done at this point")
-                    .into_iter()
-                    .zip(parameters)
-                    .map(|(ty, param)| {
-                        let ty = ty.to_instantiated_type()?;
-                        Ok(TypedIdentifier {
-                            name: param.name,
-                            ty,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let return_type = inferred_return_type
-                    .expect("Compiler bug: Type inference must be done at this point")
-                    .to_instantiated_type()?;
-                let body = body.type_ast(&HashMap::new())?;
-                TypedDeclKind::FunDecl {
-                    name,
-                    parameters,
-                    return_type,
-                    body: Box::new(body),
-                }
-            }
-            DeclKind::StructDecl { name, fields, .. } => {
                 let fields = fields
                     .into_iter()
                     .map(|StronglyTypedIdentifier { name, ty }| {
@@ -119,10 +124,34 @@ impl Decl {
                         Ok(TypedIdentifier { name, ty })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                TypedDeclKind::StructDecl { name, fields }
+                let methods = methods
+                    .into_iter()
+                    .map(|fun_decl| fun_decl.type_ast())
+                    .collect::<Result<Vec<_>, _>>()?;
+                TypedDeclKind::StructDecl {
+                    name,
+                    fields,
+                    methods,
+                }
             }
-            DeclKind::EnumDecl { name, variants, .. } => TypedDeclKind::EnumDecl { name, variants },
+            DeclKind::EnumDecl {
+                name,
+                variants,
+                methods,
+                ..
+            } => {
+                let methods = methods
+                    .into_iter()
+                    .map(|fun_decl| fun_decl.type_ast())
+                    .collect::<Result<Vec<_>, _>>()?;
+                TypedDeclKind::EnumDecl {
+                    name,
+                    variants,
+                    methods,
+                }
+            }
             DeclKind::TraitDecl { .. } => todo!(),
+            DeclKind::ImplDecl { .. } => todo!(),
         };
 
         Ok(TypedDecl {

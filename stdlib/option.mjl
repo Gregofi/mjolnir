@@ -2,3 +2,12 @@ enum Option[T] {
     Some(T),
     None,
 }
+
+impl Option[T] {
+    fn is_none(): Bool = match self {
+        None => true,
+        Some(_) => false,
+    }
+
+    fn is_some(): Bool = self.is_none() == false
+}
