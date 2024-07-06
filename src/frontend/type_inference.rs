@@ -13,7 +13,9 @@
 /// those can either be types or type variables, when the types are not yet known
 /// in the inference.
 // TODO: Check if the Rcs are truly necessary.
-use super::utils::{GenericDeclaration, IdEnv, StronglyTypedIdentifier, WrittenType};
+use super::utils::{
+    GenericDeclaration, IdEnv, StronglyTypedIdentifier, WeaklyTypedIdentifier, WrittenType,
+};
 use crate::ast::{
     Decl, DeclKind, Expr, ExprKind, FunDecl, Module, Operator, Pattern, Stmt, StmtKind, VarDecl,
 };
@@ -295,7 +297,7 @@ impl SymbolTable {
         match (t1.as_ref(), t2.as_ref()) {
             // This is a quick fix, some programs would cause an unification of T?1 = T?1,
             // which would cause an infinite loop.
-            (Type::TypeVar(x), Type::TypeVar(y)) if x == y => {},
+            (Type::TypeVar(x), Type::TypeVar(y)) if x == y => {}
             (Type::TypeVar(tv), _) => {
                 let t = self.unif_table.get(tv);
                 if let Some(t) = t {
@@ -322,7 +324,7 @@ impl SymbolTable {
                 return Err(TypeInferenceError::UnificationError(format!(
                     "Unification error, cannot unify ⟦{}⟧ = ⟦{}⟧",
                     t1, t2
-                )))
+                )));
             }
         }
         Ok(())
@@ -337,22 +339,23 @@ impl SymbolTable {
     }
 
     /// Performs type inference upon the function body and returns the inferred type of the
-    /// function.
+    /// function. Does not store the function into the symbol table.
+    /// It will also mutate the inferred_* fields of the FunDecl (it'll fill them).
     fn visit_function(
         &mut self,
         FunDecl {
             name,
-            generics,
             parameters,
             inferred_parameters,
             return_type,
             inferred_return_type,
             body,
+            ..
         }: &mut FunDecl,
     ) -> Result<Type, TypeInferenceError> {
-        // TODO: This is weird, we should probably push env here.
-        // Additionally, check if we don't do things twice (here and in the precollect step)
+        // TODO: Check if we don't do things twice (here and in the precollect step)
         debug!("Visiting function {}", name);
+        self.ids.push();
         let mut typed_params = vec![];
         for param in parameters {
             let ty = param
@@ -376,15 +379,13 @@ impl SymbolTable {
 
         *inferred_return_type = Some(ret_ty_stated.clone());
         *inferred_parameters = Some(typed_params.clone());
-        let fun_scheme = TypeScheme::create_function(generics.to_vec(), fun_ty.clone().into_rc());
-
-        debug!("Adding function {} with type {}", name, fun_ty);
-        self.ids.insert(name.clone(), fun_scheme);
 
         // Visiting the function body must be done at the
         // end, when we have all the types in the symbol table.
         // Otherwise, recursive functions will not work.
         let ret_ty = self.visit_expr(body)?;
+        self.ids.pop();
+
         self.unify(&ret_ty_stated, &ret_ty)?;
 
         Ok(fun_ty.clone())
@@ -407,6 +408,12 @@ impl SymbolTable {
         match &mut decl.node {
             DeclKind::FunDecl(fun) => {
                 let fun_ty = self.visit_function(fun)?;
+                let fun_scheme =
+                    TypeScheme::create_function(fun.generics.clone(), fun_ty.clone().into_rc());
+
+                debug!("Adding function {} with type {}", fun.name, fun_ty);
+                self.ids.insert(fun.name.clone(), fun_scheme);
+
                 decl.inferred_ty = Some(fun_ty);
             }
             DeclKind::EnumDecl {
@@ -620,7 +627,7 @@ impl SymbolTable {
                         return Err(TypeInferenceError::TypeMismatch(format!(
                             "Struct {} not found; name used as struct initializer",
                             name
-                        )))
+                        )));
                     }
                 };
 
@@ -634,7 +641,7 @@ impl SymbolTable {
                             return Err(TypeInferenceError::TypeMismatch(format!(
                                 "Field {} not found in struct {}",
                                 field_name, name
-                            )))
+                            )));
                         }
                     };
 
@@ -653,7 +660,7 @@ impl SymbolTable {
                     _ => {
                         return Err(TypeInferenceError::TypeMismatch(
                             "The type of the struct must be known at this point".to_string(),
-                        ))
+                        ));
                     }
                 };
 
@@ -671,7 +678,7 @@ impl SymbolTable {
                         return Err(TypeInferenceError::TypeMismatch(format!(
                             "Target type {} not found when accessing member {}",
                             cons.name, member
-                        )))
+                        )));
                     }
                 };
 
@@ -695,6 +702,7 @@ impl SymbolTable {
                 );
                 member_type.fill_types(&types)
             }
+            ExprKind::Lambda(fun) => Ok(self.visit_function(fun)?.into_rc()),
         }?;
         expr.inferred_ty = Some(res.clone());
         Ok(res)
@@ -708,7 +716,7 @@ impl SymbolTable {
             // For functions
             if let Some(ty) = imported_module.ids.get(*id) {
                 self.ids.insert(id.to_string(), ty.clone());
-            // Others (structs, enums)
+                // Others (structs, enums)
             } else if let Some(ty) = imported_module.types.get(*id) {
                 match ty {
                     TypeMetadata::Struct(metadata) => {
@@ -750,7 +758,7 @@ impl SymbolTable {
                         return Err(TypeInferenceError::TypeMismatch(format!(
                             "Struct {} not found when matching patterns",
                             name
-                        )))
+                        )));
                     }
                 };
 
@@ -761,7 +769,7 @@ impl SymbolTable {
                         return Err(TypeInferenceError::TypeMismatch(format!(
                             "Type must be known at this point: {}",
                             target_ty
-                        )))
+                        )));
                     }
                 };
 
@@ -781,7 +789,7 @@ impl SymbolTable {
                             return Err(TypeInferenceError::TypeMismatch(format!(
                                 "Field {} not found in struct {}",
                                 field, name
-                            )))
+                            )));
                         }
                     };
                     self.ids.insert(field.clone(), field_ty.into_scheme());
@@ -839,7 +847,7 @@ impl SymbolTable {
                         return Err(TypeInferenceError::TypeMismatch(format!(
                             "Expected constructor, got {}",
                             cons_inst
-                        )))
+                        )));
                     }
                 };
 
@@ -868,6 +876,8 @@ impl SymbolTable {
         }
     }
 
+    /// Recursively replaces all type variables with the type they are unified with.
+    /// If the type variable is not found in the unification table, an error is returned.
     fn close_type(&self, ty: &Rc<Type>) -> Result<Rc<Type>, TypeInferenceError> {
         match ty.as_ref() {
             Type::TypeVar(TypeVar(id)) => {
@@ -895,6 +905,7 @@ impl SymbolTable {
     }
 
     fn finalize_fun(&mut self, fun_decl: FunDecl) -> Result<FunDecl, TypeInferenceError> {
+        debug!("Finalizing function {}", fun_decl.name);
         let closed_params = fun_decl
             .inferred_parameters
             .expect("Finalize must be done after types are inferred")
@@ -984,6 +995,29 @@ impl SymbolTable {
             _ => stmt.node,
         };
         Ok(Stmt { node, ..stmt })
+    }
+
+    fn finalize_expr(&mut self, expr: Expr) -> Result<Expr, TypeInferenceError> {
+        let node = match expr.node {
+            ExprKind::Lambda(fun) => {
+                let finalized_fun = self.finalize_fun(fun)?;
+                Ok(ExprKind::Lambda(finalized_fun).into())
+            }
+            _ => Ok(expr.node),
+        }?;
+
+        let inferred_ty = if let Some(ty) = expr.inferred_ty {
+            Some(self.close_type(&ty)?)
+        } else {
+            return Err(TypeInferenceError::UnificationError(
+                "Type inference failed, did not find type variable".to_string(),
+            ));
+        };
+        Ok(Expr {
+            node,
+            inferred_ty,
+            ..expr
+        })
     }
 }
 
@@ -1263,16 +1297,7 @@ pub fn type_infer_modules(
                     decl.fold(
                         &|decl| symbol_table.borrow_mut().finalize_decl(decl),
                         &|stmt| symbol_table.borrow_mut().finalize_stmt(stmt),
-                        &|mut expr| {
-                            expr.inferred_ty = if let Some(ty) = expr.inferred_ty {
-                                Some(symbol_table.borrow_mut().close_type(&ty)?)
-                            } else {
-                                return Err(TypeInferenceError::UnificationError(
-                                    "Type inference failed, did not find type variable".to_string(),
-                                ));
-                            };
-                            Ok(expr)
-                        },
+                        &|expr| symbol_table.borrow_mut().finalize_expr(expr),
                     )
                 })
                 .collect::<Result<Vec<Decl>, _>>()?;
@@ -1480,7 +1505,6 @@ fn main(): Int = {
         )
         .unwrap();
 
-        println!("{}\n", decls[1]);
         assert!(decls[1].to_string().contains("fn main(): Int = {"));
         assert!(decls[1]
             .to_string()
@@ -1540,7 +1564,6 @@ fn main(): Int = {
         )
         .unwrap();
 
-        println!("{}\n", decls[1]);
         assert!(decls[1].to_string().contains("fn main(): Int = {"));
         assert!(decls[1]
             .to_string()
@@ -1569,7 +1592,6 @@ fn main(): Int = {
         )
         .unwrap();
 
-        println!("{}\n", decls[1]);
         assert!(decls[1].to_string().contains("fn main(): Int = {"));
         assert!(decls[1]
             .to_string()
@@ -1862,23 +1884,72 @@ fn main(): Int = {
     let odd = x.map(is_odd);
     0
 }
-").unwrap();
+",
+        )
+        .unwrap();
 
         assert_eq!(decls.len(), 3);
-        if let DeclKind::EnumDecl{ name, variants, generics, methods } = &decls[0].node {
+        if let DeclKind::EnumDecl {
+            name,
+            variants,
+            generics,
+            methods,
+        } = &decls[0].node
+        {
             assert_eq!(name, "Option");
             assert_eq!(variants.len(), 2);
             assert_eq!(generics.len(), 1);
             assert_eq!(methods.len(), 3);
 
             let is_none = methods.iter().find(|m| m.name == "is_none").unwrap();
-            assert!(is_none.body.to_string().contains("let self_alias: Option[T] = self;"));
+            assert!(is_none
+                .body
+                .to_string()
+                .contains("let self_alias: Option[T] = self;"));
         } else {
             panic!("Expected EnumDecl")
         }
-        assert!(decls[2].to_string().contains("let x: Option[Int] = Some(1);"));
+        assert!(decls[2]
+            .to_string()
+            .contains("let x: Option[Int] = Some(1);"));
         assert!(decls[2].to_string().contains("let y: Bool = x.is_some();"));
         assert!(decls[2].to_string().contains("let z: Bool = x.is_none();"));
-        assert!(decls[2].to_string().contains("let odd: Option[Bool] = x.map(is_odd);"));
+        assert!(decls[2]
+            .to_string()
+            .contains("let odd: Option[Bool] = x.map(is_odd);"));
+    }
+
+    #[test]
+    fn test_lambda() {
+        init();
+        let decls = infer_module(
+            "
+fn main(): Int = {
+    let f = |x| { x + 1 };
+    f(1)
+}
+",
+        )
+        .unwrap();
+
+        assert_eq!(decls.len(), 1);
+        assert!(decls[0]
+            .to_string()
+            .contains("let f: Function[Int, Int] = fn AnonymousFunction(x: Int): Int ="));
+
+        let decls = infer_module(
+            "
+fn main(): Int = {
+    let f = |x, y| { x + y };
+    f(1, 2)
+}
+",
+        )
+        .unwrap();
+
+        assert_eq!(decls.len(), 1);
+        assert!(decls[0].to_string().contains(
+            "let f: Function[Int, Int, Int] = fn AnonymousFunction(x: Int, y: Int): Int ="
+        ));
     }
 }

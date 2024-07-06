@@ -137,10 +137,11 @@ impl Display for Expr {
     }
 }
 
-impl<A, B> Display for ExprKind<A, B>
+impl<A, B, LambdaFun> Display for ExprKind<A, B, LambdaFun>
 where
     A: Display,
     B: Display,
+    LambdaFun: Display,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -213,6 +214,9 @@ where
             }
             ExprKind::MemberAccess { target, member } => {
                 write!(f, "{}.{}", target, member)
+            }
+            ExprKind::Lambda(fun) => {
+                write!(f, "{}", fun)
             }
         }
     }
@@ -306,6 +310,20 @@ impl Display for TypedStmt {
     }
 }
 
+impl Display for TypedFunDecl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fun {}(", self.name)?;
+        let parameters = self
+            .parameters
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+        write!(f, "{})", parameters)?;
+        write!(f, ": {} {{\n{}\n}}", self.return_type, self.body)
+    }
+}
+
 impl Display for TypedExpr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.node)
@@ -315,20 +333,8 @@ impl Display for TypedExpr {
 impl Display for TypedDeclKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypedDeclKind::FunDecl(TypedFunDecl {
-                name,
-                parameters,
-                return_type,
-                body,
-            }) => {
-                write!(f, "fun {}(", name)?;
-                let parameters = parameters
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "{})", parameters)?;
-                write!(f, ": {} {{\n{}\n}}", return_type, body)
+            TypedDeclKind::FunDecl(fun) => {
+                write!(f, "{}", fun)
             }
             TypedDeclKind::VarDecl(v) => {
                 write!(f, "{}", v)

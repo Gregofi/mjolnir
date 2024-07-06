@@ -66,9 +66,7 @@ pub enum Value {
         parameters: Vec<String>,
         /// All functions are considered closures. "Normal" functions will
         /// have this hashmap empty.
-        env: HashMap<String, Value>,
-        /// Which module the function is defined in
-        module: String,
+        env: CallEnvironment,
     },
     NativeFunction(native_functions::NativeFunction),
     /// Is similar to function, but is exclusivily used for constructors of variants
@@ -115,6 +113,7 @@ impl Display for Value {
     }
 }
 
+#[derive(Clone, Debug)]
 struct CallEnvironment {
     /// Each item in the vector is a new layer of scope
     env: Vec<HashMap<String, Value>>,
@@ -124,6 +123,13 @@ struct CallEnvironment {
 }
 
 impl CallEnvironment {
+    pub fn new(current_module: String) -> Self {
+        CallEnvironment {
+            env: vec![HashMap::new()],
+            current_module,
+        }
+    }
+
     pub fn add_identifier(&mut self, name: String, value: Value) {
         self.env
             .last_mut()
@@ -152,6 +158,10 @@ struct CallStack {
 impl CallStack {
     pub fn new() -> CallStack {
         CallStack { stack: vec![] }
+    }
+
+    pub fn push(&mut self, env: CallEnvironment) {
+        self.stack.push(env)
     }
 
     /// Pushes a new call environment to the stack with one layer.
@@ -285,8 +295,10 @@ impl Interpreter {
                         let fun = Some(Value::Function {
                             body: body.clone().into(),
                             parameters: parameters.iter().map(|p| p.name.clone()).collect(),
-                            module: module_name.clone(),
-                            env: HashMap::new(),
+                            env: CallEnvironment {
+                                env: vec![HashMap::new()],
+                                current_module: module_name.clone(),
+                            },
                         });
                         globals.add(module_name.clone(), name.clone(), fun.unwrap());
                     }
@@ -496,16 +508,12 @@ impl Interpreter {
         let resulting_function = self.interpret_expr(target)?;
         match resulting_function {
             Value::Function {
-                module,
                 body,
                 parameters,
                 env,
+                ..
             } => {
-                self.call_stack.push_call(module);
-                // Closure values
-                for (id, val) in env {
-                    self.call_stack.add_identifier(id.clone(), val.clone());
-                }
+                self.call_stack.push(env.clone());
                 // Argument values
                 for (param, arg) in parameters.iter().zip(args.iter()) {
                     self.call_stack.add_identifier(param.clone(), arg.clone());
@@ -700,17 +708,25 @@ impl Interpreter {
                     (Some(m), _) => Ok(m),
                     (_, Some(m)) => Ok({
                         assert!(!module.is_empty());
-                        let mut env = HashMap::new();
-                        env.insert("self".to_string(), target_val.clone());
+                        let mut env = CallEnvironment::new(module);
+                        env.add_identifier("self".to_string(), target_val.clone());
                         Value::Function {
                             body: m.body.clone(),
                             parameters: m.parameters.clone(),
                             env,
-                            module,
                         }
                     }),
                     (None, None) => Err(anyhow!("Member not found")),
                 }
+            }
+            ExprKind::Lambda(fun) => {
+                let parameters = fun.parameters.iter().map(|p| p.name.clone()).collect();
+                Ok(Value::Function {
+                    // TODO: This is expensive as f***
+                    body: fun.body.clone().into(),
+                    parameters,
+                    env: self.call_stack.get_env().clone(),
+                })
             }
         }
     }
@@ -820,7 +836,7 @@ fn fact(n: Int): Int = if n == 0 { 1 } else { n * fact(n - 1) }
 fn main(): Int = fact(5)
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 120);
     }
@@ -834,7 +850,7 @@ fn fib(n: Int): Int = if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
 fn main(): Int = fib(7)
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 13);
     }
@@ -848,7 +864,7 @@ import { pow } from \"std/internal/native\";
 fn main(): Int = pow(2, 3)
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 8);
     }
@@ -863,7 +879,7 @@ fn main(): Int = {
 }
             ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
 
@@ -878,7 +894,7 @@ fn main(): Int = {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 4);
     }
@@ -894,7 +910,7 @@ fn main(): Int = {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
@@ -911,7 +927,7 @@ fn main(): Int = {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
@@ -927,7 +943,7 @@ fn main(): Int = match 3 {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 7);
 
@@ -939,7 +955,7 @@ fn main(): Int = match 3 {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
 
@@ -951,7 +967,7 @@ fn main(): Int = match true {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 1);
     }
@@ -971,7 +987,7 @@ fn main(): Int = match Cons(1, Nil()) {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
 
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 1);
@@ -992,7 +1008,7 @@ fn main(): Int = match Cons(1, Cons(2, Nil())) {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
     }
@@ -1024,7 +1040,7 @@ fn main(): Int = {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
@@ -1040,7 +1056,7 @@ fn main(): Int = match &Pair{x: 1, y: 2} {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }
@@ -1055,7 +1071,7 @@ fn main(): Int = match 3 {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 1);
 
@@ -1067,7 +1083,7 @@ fn main(): Int = match 3 {
 }
 ",
         )
-            .unwrap();
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 2);
     }
@@ -1122,7 +1138,9 @@ fn main(): Int = {
     let a: Pair = &Pair{x: 3, y: 4};
     a.sum() + a.pythagorean()
 }
-").unwrap();
+",
+        )
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 7 + 25);
     }
@@ -1153,23 +1171,78 @@ impl List[T] {
 
     #[test]
     fn test_enum_methods() {
-        let ast = fe_pass_one_file(&format!("{}\n{}", ENUM_METHODS, "
+        let ast = fe_pass_one_file(&format!(
+            "{}\n{}",
+            ENUM_METHODS,
+            "
 fn main(): Int = {
     let lst = Cons(1, Cons(2, Cons(3, Nil())));
     lst.length()
-}")).unwrap();
+}"
+        ))
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
 
-        let ast = fe_pass_one_file(&format!("{}\n{}", ENUM_METHODS, "
+        let ast = fe_pass_one_file(&format!(
+            "{}\n{}",
+            ENUM_METHODS,
+            "
 fn add(x: Int, y: Int): Int = x + y
 
 fn main(): Int = {
     let lst = Cons(1, Cons(2, Cons(3, Nil())));
     lst.fold_left(0, add)
 }
-")).unwrap();
+"
+        ))
+        .unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 6);
+    }
+
+    #[test]
+    fn test_lambdas() {
+        let ast = fe_pass_one_file(
+            "
+fn main(): Int = {
+    let f = |x, y| { x + y };
+    f(1, 2)
+}
+",
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(ast);
+        assert_eq!(interpreter.interpret().unwrap(), 3);
+
+        let ast = fe_pass_one_file(
+            "
+fn main(): Int = {
+    let x = 1;
+    let f = |y| { x + y };
+    f(2)
+}
+",
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(ast);
+        assert_eq!(interpreter.interpret().unwrap(), 3);
+
+        let ast = fe_pass_one_file(
+            "
+fn foo(): (Int) => Int = {
+    let x = 1;
+    |y| { x + y }
+}
+
+fn main(): Int = {
+    let f = foo();
+    f(2)
+}
+",
+        )
+        .unwrap();
+        let mut interpreter = Interpreter::new(ast);
+        assert_eq!(interpreter.interpret().unwrap(), 3);
     }
 }

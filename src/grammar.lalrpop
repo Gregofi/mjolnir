@@ -40,6 +40,7 @@ match {
     "]" => RBRACKET,
     "{" => LBRACE,
     "}" => RBRACE,
+    "|" => PIPE,
     "true" => TRUE,
     "false" => FALSE,
     "fn" => FN,
@@ -225,7 +226,7 @@ Stmt: Stmt = {
 Expr: Expr = {
     #[precedence(level="0")]
     Term,
-    #[precedence(level="1")] #[assoc(side="left")]
+    #[precedence(level="2")] #[assoc(side="left")]
     <l: @L> <lhs: Expr> <opcode: BinOpPrec1> <rhs: Expr> <r: @R> => {
         Expr {
             node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
@@ -233,7 +234,7 @@ Expr: Expr = {
             inferred_ty: None,
         }
     },
-    #[precedence(level="2")] #[assoc(side="left")]
+    #[precedence(level="3")] #[assoc(side="left")]
     <l: @L> <lhs: Expr> <opcode: BinOpPrec2> <rhs: Expr> <r: @R> => {
         Expr {
             node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
@@ -241,7 +242,7 @@ Expr: Expr = {
             inferred_ty: None,
         }
     },
-    #[precedence(level="3")] #[assoc(side="left")]
+    #[precedence(level="4")] #[assoc(side="left")]
     <l: @L> <lhs: Expr> <opcode: BinOpPrec3> <rhs: Expr> <r: @R> => {
         Expr {
             node: ExprKind::Binary{op: Operator::from(opcode.as_str()), lhs: Box::new(lhs), rhs: Box::new(rhs)},
@@ -283,6 +284,7 @@ Term: Expr = {
     Compound => <>,
     Match => <>,
     StructInitializer => <>,
+    LambdaExpr => <>,
 }
 
 Compound: Expr = {
@@ -406,6 +408,22 @@ IfExpr: Expr = {
 IdentifierExpr: Expr = {
     <l: @L> <id: Identifier> <r: @R> => Expr {
         node: ExprKind::Identifier(id),
+        location: Location::new(l, r),
+        inferred_ty: None,
+    }
+}
+
+LambdaExpr: Expr = {
+    <l: @L> PIPE <parameters: MaybeTypedIdentifiers> PIPE <return_type: (COLON <WrittenType>)?> <body: Compound> <r: @R> => Expr {
+        node: ExprKind::Lambda (FunDecl {
+            name: "AnonymousFunction".to_string(),
+            parameters,
+            return_type,
+            body: Box::new(body),
+            inferred_parameters: None,
+            inferred_return_type: None,
+            generics: vec![],
+        }),
         location: Location::new(l, r),
         inferred_ty: None,
     }
