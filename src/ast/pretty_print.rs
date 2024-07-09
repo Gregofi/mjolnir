@@ -72,10 +72,7 @@ impl PrettyPrint for FunDecl {
 impl PrettyPrint for DeclKind {
     fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
         match self {
-            DeclKind::FunDecl(fd) => {
-                fd.pretty_print(f, spaces)?;
-                Ok(())
-            }
+            DeclKind::FunDecl(fd) => fd.pretty_print(f, spaces),
             DeclKind::ImplDecl {
                 target,
                 generics,
@@ -152,24 +149,24 @@ impl PrettyPrint for DeclKind {
     }
 }
 
+impl PrettyPrint for TypedFunDecl {
+    fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
+        write!(f, "fn {}(", self.name)?;
+        let parameters = self
+            .parameters
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+        write!(f, "{}): {} = ", parameters, self.return_type)?;
+        self.body.pretty_print(f, spaces + 4)
+    }
+}
+
 impl PrettyPrint for TypedDeclKind {
     fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
         match self {
-            TypedDeclKind::FunDecl(TypedFunDecl {
-                name,
-                parameters,
-                return_type,
-                body,
-            }) => {
-                write!(f, "fn {}(", name)?;
-                let parameters = parameters
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "{}): {} = ", parameters, return_type)?;
-                body.pretty_print(f, spaces + 4)
-            }
+            TypedDeclKind::FunDecl(fun) => fun.pretty_print(f, spaces),
             TypedDeclKind::VarDecl(TypedVarDecl { name, value }) => {
                 write!(f, "let {}: {} = ", name, value.ty)?;
                 value.pretty_print(f, spaces)
@@ -198,10 +195,11 @@ impl PrettyPrint for TypedDeclKind {
     }
 }
 
-impl<S, E> PrettyPrint for ExprKind<S, E>
+impl<S, E, LambdaFun> PrettyPrint for ExprKind<S, E, LambdaFun>
 where
     S: PrettyPrint + Display,
     E: PrettyPrint + Display,
+    LambdaFun: PrettyPrint + Display,
 {
     fn pretty_print(&self, f: &mut Formatter<'_>, spaces: i32) -> Result<(), Error> {
         match self {
@@ -293,6 +291,9 @@ where
             ExprKind::MemberAccess { target, member } => {
                 target.pretty_print(f, spaces)?;
                 write!(f, ".{}", member)
+            }
+            ExprKind::Lambda { .. } => {
+                todo!()
             }
         }
     }

@@ -255,4 +255,10 @@ fn main() = foo()
         assert_eq!(imports[1].imported_ids, vec!["bar", "baz"]);
         assert_eq!(imports[1].path, "./baz");
     }
+
+    #[test]
+    fn test_lambdas() {
+        assert!(parse_ast("fn foo() = |a: Int| { a + 1 }").is_ok());
+        assert!(parse_ast("fn foo(lst) = lst.map(|x| { x * 2 })").is_ok());
+    }
 }

@@ -287,6 +287,7 @@ impl Expr {
             ExprKind::Boolean(v) => ExprKind::Boolean(v),
             ExprKind::Identifier(v) => ExprKind::Identifier(v),
             ExprKind::Char(v) => ExprKind::Char(v),
+            ExprKind::Lambda(fundecl) => ExprKind::Lambda(fundecl.type_ast()?),
         };
 
         Ok(TypedExpr {

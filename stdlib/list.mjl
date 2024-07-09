@@ -48,17 +48,6 @@ impl List[T] {
         Nil => Nil(),
     }
 
-    fn filter(fun: (T) => Bool): List[T] = match self {
-        Cons(head, tail) => {
-            if fun(head) {
-                Cons(head, tail.filter(fun))
-            } else {
-                tail.filter(fun)
-            }
-        },
-        Nil => Nil(),
-    }
-
     fn fold_right[Q](init: Q, op: (T, Q) => Q): Q = match self {
         Cons(head, tail) => op(head, tail.fold_right(init, op)),
         Nil => init,
@@ -68,6 +57,14 @@ impl List[T] {
         Cons(head, tail) => tail.fold_left(op(head, init), op),
         Nil => init,
     }
+
+    fn filter(fun: (T) => Bool): List[T] = self.fold_left(Nil(), |x, acc| {
+        if fun(x) {
+            Cons(x, acc)
+        } else {
+            acc
+        }
+    })
 
     fn reverse(): List[T] = self.fold_left(Nil(), Cons)
 }

@@ -109,8 +109,10 @@ impl Display for Pattern {
     }
 }
 
+/// We unfortunately need to separate LambdaFunDecl.
+/// For untyped, it is FunDecl, and for typed, it is TypedFunDecl.
 #[derive(Clone, Debug)]
-pub enum ExprKind<St, Ex> {
+pub enum ExprKind<St, Ex, LambdaFunDecl> {
     Unit,
     Int(i64),
     Boolean(bool),
@@ -144,6 +146,7 @@ pub enum ExprKind<St, Ex> {
         target: Box<Ex>,
         member: String,
     },
+    Lambda(LambdaFunDecl),
 }
 
 #[derive(Clone, Debug)]
@@ -293,7 +296,7 @@ pub enum TypedDeclKind {
 
 #[derive(Clone, Debug)]
 pub struct Expr {
-    pub node: ExprKind<Stmt, Expr>,
+    pub node: ExprKind<Stmt, Expr, FunDecl>,
     pub location: Location,
     pub inferred_ty: Option<Rc<InferredType>>,
 }
@@ -306,7 +309,7 @@ pub struct Stmt {
 
 #[derive(Clone, Debug)]
 pub struct TypedExpr {
-    pub node: ExprKind<TypedStmt, TypedExpr>,
+    pub node: ExprKind<TypedStmt, TypedExpr, TypedFunDecl>,
     pub location: Location,
     pub ty: InstantiatedType,
 }
@@ -426,7 +429,16 @@ impl Expr {
                 let target = Box::new(target.fold(f_decl, f_stmt, f_expr)?);
                 self.node = ExprKind::MemberAccess { target, member };
             }
-            _ => (),
+            ExprKind::Lambda(fundecl) => {
+                let body = Box::new(fundecl.body.fold(f_decl, f_stmt, f_expr)?);
+                self.node = ExprKind::Lambda(FunDecl { body, ..fundecl });
+            }
+            // List them explicitly to avoid forgetting to implement them.
+            ExprKind::Unit => (),
+            ExprKind::Int(_) => (),
+            ExprKind::Boolean(_) => (),
+            ExprKind::Char(_) => (),
+            ExprKind::Identifier(_) => (),
         };
         f_expr(self)
     }
