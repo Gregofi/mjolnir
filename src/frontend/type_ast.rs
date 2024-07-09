@@ -54,8 +54,9 @@ impl InferredType {
     /// exist at the point of using this function. Ie. do this after type inference.
     fn to_instantiated_type(&self, location: Location) -> Result<InstantiatedType, TypeAstErr> {
         match self {
-            InferredType::TypeVar(_) => Err(TypeAstErr::new(TypeAstErrKind::NonExistingType,
-                    location,
+            InferredType::TypeVar(_) => Err(TypeAstErr::new(
+                TypeAstErrKind::NonExistingType,
+                location,
                 "Compiler bug: Cannot have type variables when typing AST".to_string(),
             )),
             InferredType::Constructor(Constructor { name, type_vec }) => {
@@ -364,9 +365,8 @@ pub fn type_modules(
                 .decls
                 .into_iter()
                 .map(|decl| decl.type_ast())
-                .collect::<Result<_, _>>().map_err(|err| {
-                    LastLayerError::from_fe(err, path.clone())
-                })?;
+                .collect::<Result<_, _>>()
+                .map_err(|err| LastLayerError::from_fe(err, path.clone()))?;
             Ok((
                 path,
                 TypedModule {

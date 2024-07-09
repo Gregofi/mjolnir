@@ -14,12 +14,9 @@ use super::error::{FrontEndError, LastLayerError};
 /// those can either be types or type variables, when the types are not yet known
 /// in the inference.
 // TODO: Check if the Rcs are truly necessary.
-use super::utils::{
-    GenericDeclaration, IdEnv, StronglyTypedIdentifier, WrittenType,
-};
+use super::utils::{GenericDeclaration, IdEnv, StronglyTypedIdentifier, WrittenType};
 use crate::ast::{
-    Decl, DeclKind, Expr, ExprKind, FunDecl, Module, Operator, Pattern, Stmt, StmtKind,
-    VarDecl,
+    Decl, DeclKind, Expr, ExprKind, FunDecl, Module, Operator, Pattern, Stmt, StmtKind, VarDecl,
 };
 use crate::backend::ast_interpreter::native_functions::get_native_functions;
 use crate::constants::STD_NATIVE_MODULE;
@@ -150,6 +147,10 @@ impl Constructor<Type> {
 }
 
 impl Type {
+    pub fn is_typevar(&self) -> bool {
+        matches!(self, Type::TypeVar(_))
+    }
+
     pub fn into_rc(self) -> Rc<Type> {
         Rc::new(self)
     }
@@ -288,7 +289,12 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    fn unify(&mut self, t1: &Rc<Type>, t2: &Rc<Type>, location: Location) -> Result<(), TypeInferenceError> {
+    fn unify(
+        &mut self,
+        t1: &Rc<Type>,
+        t2: &Rc<Type>,
+        location: Location,
+    ) -> Result<(), TypeInferenceError> {
         debug!("Unifying ⟦{}⟧ = ⟦{}⟧", t1, t2);
         match (t1.as_ref(), t2.as_ref()) {
             // This is a quick fix, some programs would cause an unification of T?1 = T?1,
@@ -387,7 +393,7 @@ impl SymbolTable {
         self.ids.pop();
 
         // TODO: Missing location here
-        self.unify(&ret_ty_stated, &ret_ty, Location::new(0,0))?;
+        self.unify(&ret_ty_stated, &ret_ty, Location::new(0, 0))?;
 
         Ok(fun_ty.clone())
     }
@@ -549,7 +555,11 @@ impl SymbolTable {
                 let then_ty = self.visit_expr(then)?;
                 let else_ty = self.visit_expr(els)?;
 
-                self.unify(&cond_ty, &Type::create_constant("Bool".to_string()), expr.location)?;
+                self.unify(
+                    &cond_ty,
+                    &Type::create_constant("Bool".to_string()),
+                    expr.location,
+                )?;
 
                 self.unify(&then_ty, &else_ty, expr.location)?;
 
@@ -588,7 +598,11 @@ impl SymbolTable {
                     if let Some(arm_cond) = arm.cond.as_mut() {
                         let ty = self.visit_expr(arm_cond)?;
                         debug!("Unifying condition with type {}", ty);
-                        self.unify(&ty, &Type::create_constant("Bool".to_string()), expr.location)?;
+                        self.unify(
+                            &ty,
+                            &Type::create_constant("Bool".to_string()),
+                            expr.location,
+                        )?;
                     }
 
                     let arm_ty = self.visit_expr(&mut arm.body)?;
@@ -664,7 +678,7 @@ impl SymbolTable {
                     _ => {
                         return Err(TypeInferenceError::new(
                             ErrorKind::TypeMismatch,
-                        expr.location,
+                            expr.location,
                             "The type of the struct must be known at this point".to_string(),
                         ));
                     }
@@ -683,7 +697,7 @@ impl SymbolTable {
                     _ => {
                         return Err(TypeInferenceError::new(
                             ErrorKind::TypeMismatch,
-                        expr.location,
+                            expr.location,
                             format!(
                                 "Target type {} not found when accessing member {}",
                                 cons.name, member
@@ -754,15 +768,21 @@ impl SymbolTable {
     ) -> Result<(), TypeInferenceError> {
         match (pattern, target_ty.as_ref()) {
             (Pattern::Wildcard, _) => Ok(()),
-            (Pattern::Int(_), _) => {
-                self.unify(target_ty, &Type::create_constant("Int".to_string()), location)
-            }
-            (Pattern::Boolean(_), _) => {
-                self.unify(target_ty, &Type::create_constant("Bool".to_string()), location)
-            }
-            (Pattern::String(_), _) => {
-                self.unify(target_ty, &Type::create_constant("String".to_string()), location)
-            }
+            (Pattern::Int(_), _) => self.unify(
+                target_ty,
+                &Type::create_constant("Int".to_string()),
+                location,
+            ),
+            (Pattern::Boolean(_), _) => self.unify(
+                target_ty,
+                &Type::create_constant("Bool".to_string()),
+                location,
+            ),
+            (Pattern::String(_), _) => self.unify(
+                target_ty,
+                &Type::create_constant("String".to_string()),
+                location,
+            ),
             (Pattern::Struct { name, fields }, _) => {
                 let struct_metadata = match self.type_ids.get(name) {
                     Some(TypeMetadata::Struct(metadata)) => metadata,
@@ -803,8 +823,7 @@ impl SymbolTable {
                         None => {
                             return Err(TypeInferenceError::new(
                                 ErrorKind::TypeMismatch,
-
-                        location,
+                                location,
                                 format!("Field {} not found in struct {}", field, name),
                             ));
                         }
@@ -821,6 +840,9 @@ impl SymbolTable {
                 // by the generics, since the target of the pattern match is equal
                 // to the return type of the constructor.
                 let variant_cons = match self.ids.get(name) {
+                    Some(cons) if cons.ty.is_typevar() => {
+                        panic!("Compiler error; Enum constructor should be known at this point; cons: {:?}, pattern: {:?}, target: {:?}", cons, pattern, target_ty)
+                    }
                     Some(cons) => Ok(cons),
                     None => Err(TypeInferenceError::new(
                         ErrorKind::TypeMismatch,
@@ -839,7 +861,7 @@ impl SymbolTable {
                     _ => {
                         return Err(TypeInferenceError::new(
                             ErrorKind::TypeMismatch,
-                        location,
+                            location,
                             format!("Type must be known at this point: {}", target_ty),
                         ));
                     }
@@ -859,14 +881,15 @@ impl SymbolTable {
                     cons_inst
                 );
 
-                // Now we have the type of the constructor, we can check the types of the patterns
+                // Now we have the type of the constructor,
+                // we can check the types of the patterns
                 let cons = match cons_inst.as_ref() {
                     Type::Constructor(cons) => cons,
                     _ => {
                         return Err(TypeInferenceError::new(
                             ErrorKind::TypeMismatch,
-                        location,
-                            format!("Expected constructor, got {}", cons_inst),
+                            location,
+                            format!("Expected enum variant instance, got {}", cons_inst),
                         ));
                     }
                 };
@@ -880,16 +903,26 @@ impl SymbolTable {
             (Pattern::Identifier(name), ty) => {
                 // `match self { None => ... }` is a special case.
                 // The `None` is treated as a variant if the constructor
-                // exists in scope.
-                if self.ids.get(name).is_some() {
-                    return self.unify_pattern(
-                        &Rc::new(Pattern::Enum {
-                            name: name.clone(),
-                            patterns: vec![],
-                        }),
-                        target_ty,
-                        location,
-                    );
+                // exists in scope. This is only considered if the
+                // type of the pattern is already known constructor
+                // with function type. TODO: This however should be fully
+                // checked that this really is an enum cons.
+                if let Some(cons) = self.ids.get(name) {
+                    match cons.ty.as_ref() {
+                        Type::Constructor(Constructor {
+                            name: cons_name, ..
+                        }) if cons_name == "Function" => {
+                            return self.unify_pattern(
+                                &Rc::new(Pattern::Enum {
+                                    name: name.clone(),
+                                    patterns: vec![],
+                                }),
+                                target_ty,
+                                location,
+                            );
+                        }
+                        _ => (),
+                    }
                 }
                 self.ids.insert(name.clone(), (*ty).clone().into_scheme());
                 Ok(())
@@ -1246,7 +1279,9 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
                         methods: methods
                             .iter()
                             // TODO: Again, bad location
-                            .map(|method| Ok((method.name.clone(), method.to_typescheme(decl.location)?)))
+                            .map(|method| {
+                                Ok((method.name.clone(), method.to_typescheme(decl.location)?))
+                            })
                             .collect::<Result<HashMap<_, _>, _>>()?,
                         generics: generics.iter().map(|g| g.name.clone()).collect(),
                     },
@@ -1266,21 +1301,31 @@ pub fn type_infer_modules(
     // Move methods from 'Impl' blocks into the structures
     let modules = modules
         .into_iter()
-        .map(|(name, module)| Ok((name.clone(), fill_methods(module).map_err(|e| LastLayerError{
-            location: e.location,
-            error: e.error,
-            module: name.clone(),
-        })?)))
+        .map(|(name, module)| {
+            Ok((
+                name.clone(),
+                fill_methods(module).map_err(|e| LastLayerError {
+                    location: e.location,
+                    error: e.error,
+                    module: name.clone(),
+                })?,
+            ))
+        })
         .collect::<Result<HashMap<_, _>, _>>()?;
 
     // First, we need to collect all the types from all the modules.
     let mut module_metadata = modules
         .iter()
-        .map(|(name, module)| Ok((name.clone(), precollect_types(module).map_err(|e| LastLayerError{
-            location: e.location,
-            error: e.error,
-            module: name.clone(),
-        })?)))
+        .map(|(name, module)| {
+            Ok((
+                name.clone(),
+                precollect_types(module).map_err(|e| LastLayerError {
+                    location: e.location,
+                    error: e.error,
+                    module: name.clone(),
+                })?,
+            ))
+        })
         .collect::<Result<HashMap<_, _>, _>>()?;
 
     // Also native functions
@@ -1311,14 +1356,16 @@ pub fn type_infer_modules(
 
             // Collect all the types from the imports
             for import in &module.imports {
-                let imported_module_metadata =
-                    module_metadata.get(&import.path).ok_or_else(|| {
+                let imported_module_metadata = module_metadata
+                    .get(&import.path)
+                    .ok_or_else(|| {
                         TypeInferenceError::new(
                             ErrorKind::TypeMismatch,
                             import.location,
                             format!("Module {} not found in imports", import.path),
                         )
-                    }).map_err(|e| LastLayerError{
+                    })
+                    .map_err(|e| LastLayerError {
                         location: e.location,
                         error: e.error,
                         module: name.clone(),
@@ -1334,11 +1381,14 @@ pub fn type_infer_modules(
             // Do the actual type inference
             for decl in &mut module.decls {
                 // TODO: Shouldn't we push a new scope here?
-                symbol_table.borrow_mut().visit_decl(decl).map_err(|o| LastLayerError{
-                    location: o.location,
-                    error: o.error,
-                    module: name.clone(),
-                })?;
+                symbol_table
+                    .borrow_mut()
+                    .visit_decl(decl)
+                    .map_err(|o| LastLayerError {
+                        location: o.location,
+                        error: o.error,
+                        module: name.clone(),
+                    })?;
             }
 
             // Fold over (or rather for-each) over all the AST nodes and finalize the types (remove
@@ -1353,7 +1403,8 @@ pub fn type_infer_modules(
                         &|expr| symbol_table.borrow_mut().finalize_expr(expr),
                     )
                 })
-                .collect::<Result<Vec<Decl>, _>>().map_err(|e| LastLayerError{
+                .collect::<Result<Vec<Decl>, _>>()
+                .map_err(|e| LastLayerError {
                     location: e.location,
                     error: e.error,
                     module: name.clone(),

@@ -1,0 +1,26 @@
+import { getchar, putchar } from "std/internal/native";
+import { List } from "./list.mjl";
+import { Result } from "./result.mjl";
+
+struct String {
+    data: List[Char],
+}
+
+impl String {
+    fn print(): Unit = {
+        match self.data {
+            Cons(head, tail) => {
+                putchar(head);
+                &String { data: tail }.print()
+            },
+            Nil => {},
+        }
+    }
+
+    fn println(): Unit = {
+        self.print();
+        putchar('\n');
+    }
+}
+
+fn from_list(lst: List[Char]): String = &String { data: lst }

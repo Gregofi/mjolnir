@@ -105,7 +105,7 @@ pub enum ExprKind<St, Ex, LambdaFunDecl> {
     Unit,
     Int(i64),
     Boolean(bool),
-    Char(char),
+    Char(u8),
     Identifier(String),
     Compound(Vec<St>, Box<Ex>),
     FunCall {

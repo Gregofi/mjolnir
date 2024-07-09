@@ -1,0 +1,41 @@
+// Due to design limitations in the interpreter, IO is implemented with side effects with
+// intrinsics from the runtime.
+
+import { getchar, putchar } from "std/internal/native";
+import { String, from_list } from "./string.mjl";
+import { Result } from "./result.mjl";
+import { Option } from "./option.mjl";
+import { List } from "./list.mjl";
+
+struct IoError {
+    reason: String,    
+}
+
+fn _read_delim(delim: Char): List[Char] = {
+    let c = read_char();
+    match c {
+        None => Nil(),
+        Some(c) if c == delim => Nil(),
+        Some(c) => Cons(c, _read_delim(delim)),
+    }
+}
+
+/// Read one char from stdin.
+/// Returns None if EOF.
+fn read_char(): Option[Char] = {
+    let x = getchar();
+    if x == '0' {
+        None()
+    } else {
+        Some(x)
+    }
+}
+
+/// Prints one char to stdout.
+fn print_char(c: Char): Unit = putchar(c)
+
+/// Reads until given delimiter or EOF.
+fn read_delim(delim: Char): String = from_list(_read_delim(delim))    
+
+/// Reads a line from the standard input.
+fn readline(): String = read_delim('\n')

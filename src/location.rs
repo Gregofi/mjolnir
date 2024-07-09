@@ -47,12 +47,17 @@ fn prefix(mut line_number: usize, print_line: bool) -> ColoredString {
     // 99 |   ....
     // 100 | ....
     // It is not aligned.
-    format!("{}{}  | ", if line_number < 10 { " " } else { "" },
+    format!(
+        "{}{}  | ",
+        if line_number < 10 { " " } else { "" },
         if print_line {
-        line_number.to_string() 
-    } else {
-        " ".repeat((line_number.checked_ilog10().unwrap_or(0) + 1) as usize)
-    }).bright_blue().bold()
+            line_number.to_string()
+        } else {
+            " ".repeat((line_number.checked_ilog10().unwrap_or(0) + 1) as usize)
+        }
+    )
+    .bright_blue()
+    .bold()
 }
 
 /// Formats an error message for the given location.
@@ -75,23 +80,42 @@ fn print_source_error(source: &str, location: Location) {
 
     // This is simple, we just underline the error.
     if start_line == end_line {
-        println!("{}{}{}", prefix(start_line, false), " ".repeat(start_column + 1), "^".repeat(end_column - start_column).red().bold());
+        println!(
+            "{}{}{}",
+            prefix(start_line, false),
+            " ".repeat(start_column + 1),
+            "^".repeat(end_column - start_column).red().bold()
+        );
         return;
     }
 
     // This is harder, we need to do shenanigans with the lines.
-    // Ie.     foo 
+    // Ie.     foo
     // ________^
     // |        +
     // |                bar
     // |_________________^
-    println!("{} {}{}", prefix(start_line, false), "_".repeat(start_column).red(), "^".red().bold());
+    println!(
+        "{} {}{}",
+        prefix(start_line, false),
+        "_".repeat(start_column).red(),
+        "^".red().bold()
+    );
     let mut current_line = start_line + 1;
     while current_line <= end_line {
-        println!("{}{}{}", prefix(current_line, true), "|".red().bold(), lines[current_line]);
+        println!(
+            "{}{}{}",
+            prefix(current_line, true),
+            "|".red().bold(),
+            lines[current_line]
+        );
         current_line += 1;
     }
-    println!("{}{}", prefix(current_line, false), format!("|{}^", "_".repeat(end_column - 1)).red().bold());
+    println!(
+        "{}{}",
+        prefix(current_line, false),
+        format!("|{}^", "_".repeat(end_column - 1)).red().bold()
+    );
 }
 
 pub fn read_source(file: &str) -> String {
@@ -100,17 +124,24 @@ pub fn read_source(file: &str) -> String {
 
 /// Formats the whole error message and prints it.
 /// Uses colors and whatnot.
-pub fn print_error(LastLayerError{ error, location, module }: LastLayerError) {
+pub fn print_error(
+    LastLayerError {
+        error,
+        location,
+        module,
+    }: LastLayerError,
+) {
     let source = read_source(&module);
     let (start_line, start_column) = find_loc(&source, location.start);
-    println!("{}: {}\n  {} {}:{}:{}",
-            "error".red().bold(),
-            error.bold(),
-            "-->".bright_blue().bold(),
-            module,
-            start_line + 1,
-            start_column + 1,
-            );
+    println!(
+        "{}: {}\n  {} {}:{}:{}",
+        "error".red().bold(),
+        error.bold(),
+        "-->".bright_blue().bold(),
+        module,
+        start_line + 1,
+        start_column + 1,
+    );
     print_source_error(&source, location)
 }
 

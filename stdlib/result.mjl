@@ -1,0 +1,7 @@
+enum Result[O, E] {
+    Ok(O),
+    Err(E),
+}
+
+impl Result[O, E] {
+}
