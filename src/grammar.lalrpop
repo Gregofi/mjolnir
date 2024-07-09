@@ -8,7 +8,10 @@ grammar;
 
 // Lexer
 match {
-    // TODO: comments
+    // whitespace?
+    r"\s*" => { },
+    // Some magic regexes for comments
+    r"/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+/|(//.*)" => { },
 
     // keywords
     ";" => SEMICOLON,
@@ -279,6 +282,7 @@ Term: Expr = {
     BooleanLit => <>,
     IdentifierExpr => <>,
     CharExpr => <>,
+    UnitExpr => <>,
     FunCallExpr => <>,
     MemberAccessExpr => <>,
     IfExpr => <>,
@@ -451,13 +455,23 @@ StringLiteral: String = {
 CharExpr: Expr = {
     <l: @L> <c: CHAR> <r: @R> => Expr {
         node: ExprKind::Char({
-            match c {
+            let c = match c {
                 "'\\n'" => '\n',
                 "'\\t'" => '\t',
                 "'\\r'" => '\r',
+                "'\\0'" => '\0',
                 _ => c.chars().nth(1).unwrap(),
-            }
+            };
+            c as u8
         }),
+        location: Location::new(l, r),
+        inferred_ty: None,
+    }
+}
+
+UnitExpr: Expr = {
+    <l: @L> LPAREN RPAREN <r: @R> => Expr {
+        node: ExprKind::Unit,
         location: Location::new(l, r),
         inferred_ty: None,
     }

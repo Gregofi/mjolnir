@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::rc::Rc;
 
 use super::interpreter::Value;
@@ -54,7 +55,7 @@ fn native_putchar() -> NativeFunction {
 
             match &args[0] {
                 Value::Char(c) => {
-                    print!("{}", c);
+                    print!("{}", *c as char);
                     Ok(Value::Unit)
                 }
                 _ => Err(anyhow::anyhow!("Expected char")),
@@ -67,6 +68,29 @@ fn native_putchar() -> NativeFunction {
                 Type::create_constant("Unit".to_string()),
             )
             .into_rc(),
+        },
+    )
+}
+
+fn native_getchar() -> NativeFunction {
+    NativeFunction::new(
+        "getchar".to_string(),
+        |_args| {
+            let x = std::io::stdin().bytes().next();
+            if x.is_none() {
+                // eof
+                Ok(Value::Char(0))
+            } else {
+                let x = x.unwrap();
+                match x {
+                    Ok(c) => Ok(Value::Char(c)),
+                    Err(e) => Err(anyhow::anyhow!("Error reading char: {}", e)),
+                }
+            }
+        },
+        TypeScheme {
+            generics: vec![],
+            ty: Type::create_function(vec![], Type::create_constant("Char".to_string())).into_rc(),
         },
     )
 }
@@ -114,5 +138,10 @@ fn native_pow() -> NativeFunction {
 }
 
 pub fn get_native_functions() -> Vec<NativeFunction> {
-    vec![native_assert(), native_pow(), native_putchar()]
+    vec![
+        native_assert(),
+        native_pow(),
+        native_putchar(),
+        native_getchar(),
+    ]
 }

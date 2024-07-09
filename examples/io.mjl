@@ -1,0 +1,11 @@
+import { String } from "../stdlib/string.mjl";
+import { List } from "../stdlib/list.mjl";
+import { Option } from "../stdlib/option.mjl";
+import { Result } from "../stdlib/result.mjl";
+import { readline } from "../stdlib/io.mjl";
+
+fn main(): Int = {
+    let line = readline();
+    line.println();
+    0
+}

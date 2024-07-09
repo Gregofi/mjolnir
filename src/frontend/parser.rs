@@ -21,17 +21,17 @@ fn token_readable(token: &str) -> String {
         "FAT_RIGHT_ARROW," => "=>",
         "OR," => "||",
         "AND," => "&&",
-        "ASSIGN," => "=" ,
+        "ASSIGN," => "=",
         "EQ," => "==",
         "NEQ," => "!=",
-        "GREATER," => ">" ,
-        "LESS," => "<" ,
+        "GREATER," => ">",
+        "LESS," => "<",
         "GREATEREQ," => ">=",
         "LESSEQ," => "<=",
-        "MULTIPLY," => "*" ,
-        "DIVIDE," => "/" ,
-        "MODULO," => "%" ,
-        "PLUS," => "+" ,
+        "MULTIPLY," => "*",
+        "DIVIDE," => "/",
+        "MODULO," => "%",
+        "PLUS," => "+",
         "MINUS," => "-",
         "IF," => "if",
         "ELSE," => "else",
@@ -68,23 +68,40 @@ pub fn parse_ast(input: &str) -> Result<(Vec<Import>, Vec<Decl>), ParseErr> {
     // TODO: This is a quick hack to avoid lifetimes,
     // we should parse the error from parse here and show proper error message.
     let result = grammar::ModuleParser::new().parse(input);
-       
+
     match result {
         Err(e) => match e {
-            ParseError::InvalidToken { location } => {
-                Err(ParseErr{location, message: "Invalid token".to_string()})
-            }
-            ParseError::UnrecognizedEof { location, expected } => {
-                Err(ParseErr{location, message: format!("Unrecognized EOF found, expected {:?}", expected.iter().map(|s| token_readable(&s)).collect::<Vec<String>>())})
-            },
-            ParseError::UnrecognizedToken { token, expected } => {
-                Err(ParseErr{location: token.0, message: format!("Unrecognized token '{}', expected one of {:?}", token.1, expected.iter().map(|s| token_readable(&s)).collect::<Vec<String>>())})
-            },
-            ParseError::ExtraToken { token } => {
-                Err(ParseErr{location: token.0, message: format!("Extra token {}", token.1)})
-            },
+            ParseError::InvalidToken { location } => Err(ParseErr {
+                location,
+                message: "Invalid token".to_string(),
+            }),
+            ParseError::UnrecognizedEof { location, expected } => Err(ParseErr {
+                location,
+                message: format!(
+                    "Unrecognized EOF found, expected {:?}",
+                    expected
+                        .iter()
+                        .map(|s| token_readable(&s))
+                        .collect::<Vec<String>>()
+                ),
+            }),
+            ParseError::UnrecognizedToken { token, expected } => Err(ParseErr {
+                location: token.0,
+                message: format!(
+                    "Unrecognized token '{}', expected one of {:?}",
+                    token.1,
+                    expected
+                        .iter()
+                        .map(|s| token_readable(&s))
+                        .collect::<Vec<String>>()
+                ),
+            }),
+            ParseError::ExtraToken { token } => Err(ParseErr {
+                location: token.0,
+                message: format!("Extra token {}", token.1),
+            }),
             ParseError::User { .. } => unimplemented!(),
-        }
+        },
         Ok(ast) => Ok(ast),
     }
 }
@@ -101,6 +118,7 @@ mod test {
         assert!(parse_ast("fn main(): Int = 1").is_ok());
         assert!(parse_ast("fn foo(a: Int): Int = 1").is_ok());
         assert!(parse_ast("fn foo(a: Int, b: Result): Int = 1").is_ok());
+        assert!(parse_ast("fn foo(a: Int, b: Result): Unit = ()").is_ok());
     }
 
     #[test]
@@ -309,6 +327,8 @@ fn main(f: (Int) => (Int) => (Int) => Int) = f(1)
             "
 fn bar() = 'a'
 fn foo() = '\n'
+fn foy() = '\0'
+fn baz() = if x == 'a' { 1 } else { 0 }
 "
         )
         .is_ok());
@@ -336,5 +356,24 @@ fn main() = foo()
     fn test_lambdas() {
         assert!(parse_ast("fn foo() = |a: Int| { a + 1 }").is_ok());
         assert!(parse_ast("fn foo(lst) = lst.map(|x| { x * 2 })").is_ok());
+    }
+
+    #[test]
+    fn test_comments() {
+        assert!(parse_ast(
+            "// This is a comment
+// This is another comment
+fn foo() = 1
+
+/// Doc comment
+fn bar() = {
+    // comment inside ;)
+    2
+    /* Multiline comment
+    */
+}
+"
+        )
+        .is_ok());
     }
 }

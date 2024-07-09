@@ -58,7 +58,7 @@ enum Metadata {
 pub enum Value {
     Integer(i64),
     Bool(bool),
-    Char(char),
+    Char(u8),
     Unit,
     Function {
         body: Rc<TypedExpr>,

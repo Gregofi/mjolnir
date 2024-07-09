@@ -4,8 +4,8 @@ mod ast;
 mod backend;
 mod constants;
 mod frontend;
-mod traits;
 mod location;
+mod traits;
 
 use backend::ast_interpreter::interpreter::Interpreter;
 use frontend::parse_and_check_files;

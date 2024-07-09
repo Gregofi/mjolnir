@@ -87,7 +87,8 @@ fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>, LastLayerErr
             error: e.to_string(),
             location: Location::new(0, 0),
             module: entrypoint.to_string(),
-        }.with_context("Failed to canonicalize entrypoint path")
+        }
+        .with_context("Failed to canonicalize entrypoint path")
     })?);
 
     // bfs
@@ -96,19 +97,15 @@ fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>, LastLayerErr
         debug!("Parsing file: {}", current);
         let contents = std::fs::read_to_string(current.clone())
             .with_context(|| format!("Failed to read file {}", current))
-            .map_err(|e| {
-                LastLayerError {
-                    error: e.to_string(),
-                    location: Location::new(0, 0),
-                    module: current.clone(),
-                }
-            })?;
-        let (imports, decls) = parser::parse_ast(&contents).map_err(|e| {
-            LastLayerError {
-                error: e.message,
-                location: Location::new(e.location, e.location + 1),
+            .map_err(|e| LastLayerError {
+                error: e.to_string(),
+                location: Location::new(0, 0),
                 module: current.clone(),
-            }
+            })?;
+        let (imports, decls) = parser::parse_ast(&contents).map_err(|e| LastLayerError {
+            error: e.message,
+            location: Location::new(e.location, e.location + 1),
+            module: current.clone(),
         })?;
         // Transform imports to absolute shortests paths, to make them unique.
         let mut transformed_imports = vec![];
@@ -164,17 +161,20 @@ fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>, LastLayerErr
 pub fn fe_pass(files: HashMap<String, String>) -> Result<HashMap<String, TypedModule>> {
     let mut modules = HashMap::new();
     for (name, content) in files {
-        let (imports, decls) = parser::parse_ast(&content).map_err(|_| anyhow!("Parsing failed"))?;
+        let (imports, decls) =
+            parser::parse_ast(&content).map_err(|_| anyhow!("Parsing failed"))?;
         modules.insert(name, Module { imports, decls });
     }
-    let inferred = type_inference::type_infer_modules(modules).map_err(|_| anyhow!("Type inference failed"))?;
-    let typed =
-        type_ast::type_modules(inferred).map_err(|_| anyhow!("AST Typing failed"))?;
+    let inferred = type_inference::type_infer_modules(modules)
+        .map_err(|_| anyhow!("Type inference failed"))?;
+    let typed = type_ast::type_modules(inferred).map_err(|_| anyhow!("AST Typing failed"))?;
     Ok(typed)
 }
 
 /// Starting from entrypoint file, parses and typechecks it and all files that it imports.
-pub fn parse_and_check_files(entrypoint: &str) -> Result<HashMap<String, TypedModule>, LastLayerError> {
+pub fn parse_and_check_files(
+    entrypoint: &str,
+) -> Result<HashMap<String, TypedModule>, LastLayerError> {
     let modules = parse_files(entrypoint)?;
     let inferred = type_inference::type_infer_modules(modules)?;
     type_ast::type_modules(inferred)
