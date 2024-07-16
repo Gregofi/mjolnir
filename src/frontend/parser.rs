@@ -2,15 +2,91 @@ use crate::ast::{Decl, Import};
 
 extern crate lalrpop_util;
 use anyhow::{anyhow, Result};
-use lalrpop_util::lalrpop_mod;
+use lalrpop_util::{lalrpop_mod, ParseError};
 
-pub fn parse_ast(input: &str) -> Result<(Vec<Import>, Vec<Decl>)> {
+#[derive(Debug, Clone)]
+pub struct ParseErr {
+    pub location: usize,
+    pub message: String,
+}
+
+fn token_readable(token: &str) -> String {
+    let s = match token {
+        "SEMICOLON" => ";",
+        "COLON" => ":",
+        "UNDERSCORE" => "_",
+        "AMPER" => "&",
+        "BANG" => "!",
+        "RIGHT_ARROW" => "=>",
+        "FAT_RIGHT_ARROW," => "=>",
+        "OR," => "||",
+        "AND," => "&&",
+        "ASSIGN," => "=" ,
+        "EQ," => "==",
+        "NEQ," => "!=",
+        "GREATER," => ">" ,
+        "LESS," => "<" ,
+        "GREATEREQ," => ">=",
+        "LESSEQ," => "<=",
+        "MULTIPLY," => "*" ,
+        "DIVIDE," => "/" ,
+        "MODULO," => "%" ,
+        "PLUS," => "+" ,
+        "MINUS," => "-",
+        "IF," => "if",
+        "ELSE," => "else",
+        "LPAREN," => "(",
+        "RPAREN," => ")",
+        "LET," => "let",
+        "LBRACKET," => "[",
+        "RBRACKET," => "]",
+        "LBRACE," => "{",
+        "RBRACE," => "}",
+        "PIPE," => "|",
+        "TRUE," => "true",
+        "FALSE," => "false",
+        "FN," => "fn",
+        "COMMA," => ",",
+        "DOT," => ".",
+        "RETURN," => "return",
+        "ELIF," => "elif",
+        "STRUCT," => "struct",
+        "ENUM," => "enum",
+        "MATCH," => "match",
+        "IMPORT," => "import",
+        "FROM," => "from",
+        "IMPL," => "impl",
+        "DOUBLE_QUOTE," => "\"",
+        "SINGLE_QUOTE," => "'",
+        _ => token,
+    };
+    s.to_string()
+}
+
+pub fn parse_ast(input: &str) -> Result<(Vec<Import>, Vec<Decl>), ParseErr> {
     lalrpop_mod!(pub grammar);
     // TODO: This is a quick hack to avoid lifetimes,
     // we should parse the error from parse here and show proper error message.
-    grammar::ModuleParser::new()
-        .parse(input)
-        .map_err(|err| anyhow!("Parse error: {:?}", err))
+    let result = grammar::ModuleParser::new().parse(input);
+       
+    match result {
+        Err(e) => match e {
+            ParseError::InvalidToken { location } => {
+                Err(ParseErr{location, message: "Invalid token".to_string()})
+            }
+            ParseError::UnrecognizedEof { location, expected } => {
+                Err(ParseErr{location, message: format!("Unrecognized EOF found, expected {:?}", expected.iter().map(|s| token_readable(&s)).collect::<Vec<String>>())})
+            },
+            ParseError::UnrecognizedToken { token, expected } => {
+                Err(ParseErr{location: token.0, message: format!("Unrecognized token '{}', expected one of {:?}", token.1, expected.iter().map(|s| token_readable(&s)).collect::<Vec<String>>())})
+            },
+            ParseError::ExtraToken { token } => {
+                Err(ParseErr{location: token.0, message: format!("Extra token {}", token.1)})
+            },
+            ParseError::User { .. } => unimplemented!(),
+        }
+        Ok(ast) => Ok(ast),
+    }
 }
 
 #[cfg(test)]

@@ -15,29 +15,24 @@ use log::debug;
 
 use crate::ast::*;
 use crate::frontend::types::TypeInfo;
+use crate::location::Location;
 
+use super::error::{FrontEndError, LastLayerError};
 use super::type_inference::{Constructor, Type as InferredType};
 use super::types::InstantiatedType;
 use super::utils::{StronglyTypedIdentifier, TypedIdentifier, WrittenType};
 
 #[derive(Debug, Clone)]
-pub enum TypeAstError {
-    NonExistingType(String),
+pub enum TypeAstErrKind {
+    NonExistingType,
     #[allow(dead_code)]
-    Untyped(String),
+    Untyped,
 }
 
-impl Display for TypeAstError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            TypeAstError::NonExistingType(msg) => write!(f, "{}", msg),
-            TypeAstError::Untyped(msg) => write!(f, "{}", msg),
-        }
-    }
-}
+type TypeAstErr = FrontEndError<TypeAstErrKind>;
 
 impl WrittenType {
-    fn to_instantiated_type(&self) -> Result<InstantiatedType, TypeAstError> {
+    fn to_instantiated_type(&self) -> Result<InstantiatedType, TypeAstErr> {
         match self {
             WrittenType::Identifier { name, generics } => {
                 let generics = generics
@@ -57,15 +52,16 @@ impl WrittenType {
 impl InferredType {
     /// Esentially removes the type variables from the type information, type variables must not
     /// exist at the point of using this function. Ie. do this after type inference.
-    fn to_instantiated_type(&self) -> Result<InstantiatedType, TypeAstError> {
+    fn to_instantiated_type(&self, location: Location) -> Result<InstantiatedType, TypeAstErr> {
         match self {
-            InferredType::TypeVar(_) => Err(TypeAstError::NonExistingType(
+            InferredType::TypeVar(_) => Err(TypeAstErr::new(TypeAstErrKind::NonExistingType,
+                    location,
                 "Compiler bug: Cannot have type variables when typing AST".to_string(),
             )),
             InferredType::Constructor(Constructor { name, type_vec }) => {
                 let generics = type_vec
                     .iter()
-                    .map(|arg| arg.to_instantiated_type())
+                    .map(|arg| arg.to_instantiated_type(location))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(InstantiatedType {
                     ty: name.clone(),
@@ -77,7 +73,7 @@ impl InferredType {
 }
 
 impl FunDecl {
-    fn type_ast(self) -> Result<TypedFunDecl, TypeAstError> {
+    fn type_ast(self) -> Result<TypedFunDecl, TypeAstErr> {
         debug!("Typing function declaration: {}", self.name);
 
         let parameters = self
@@ -86,7 +82,8 @@ impl FunDecl {
             .into_iter()
             .zip(self.parameters)
             .map(|(ty, param)| {
-                let ty = ty.to_instantiated_type()?;
+                // TODO: Location
+                let ty = ty.to_instantiated_type(Location::new(0, 0))?;
                 Ok(TypedIdentifier {
                     name: param.name,
                     ty,
@@ -96,7 +93,7 @@ impl FunDecl {
         let return_type = self
             .inferred_return_type
             .expect("Compiler bug: Type inference must be done at this point")
-            .to_instantiated_type()?;
+            .to_instantiated_type(Location::new(0, 0))?;
         let body = self.body.type_ast(&HashMap::new())?;
         Ok(TypedFunDecl {
             name: self.name,
@@ -108,7 +105,7 @@ impl FunDecl {
 }
 
 impl Decl {
-    pub fn type_ast(self) -> Result<TypedDecl, TypeAstError> {
+    pub fn type_ast(self) -> Result<TypedDecl, TypeAstErr> {
         let typed_kind = match self.node {
             DeclKind::FunDecl(fun_decl) => TypedDeclKind::FunDecl(fun_decl.type_ast()?),
             DeclKind::StructDecl {
@@ -165,7 +162,7 @@ impl Stmt {
     pub fn type_ast(
         self,
         type_table: &HashMap<String, Rc<TypeInfo>>,
-    ) -> Result<TypedStmt, TypeAstError> {
+    ) -> Result<TypedStmt, TypeAstErr> {
         let node = match self.node {
             StmtKind::VarDecl(vardecl) => TypedStmtKind::VarDecl(TypedVarDecl {
                 name: vardecl.name,
@@ -184,13 +181,11 @@ impl Expr {
     pub fn type_ast(
         self,
         type_table: &HashMap<String, Rc<TypeInfo>>,
-    ) -> Result<TypedExpr, TypeAstError> {
+    ) -> Result<TypedExpr, TypeAstErr> {
         let ty = if let Some(ty) = &self.inferred_ty {
-            ty.to_instantiated_type()?
+            ty.to_instantiated_type(self.location)?
         } else {
-            return Err(TypeAstError::NonExistingType(
-                "E0002 (Compiler bug): Cannot type AST without inferred types".to_string(),
-            ));
+            panic!("Compiler bug: Cannot type AST without inferred types");
         };
 
         let node = match self.node {
@@ -298,7 +293,7 @@ impl Expr {
     }
 }
 
-pub fn type_ast(ast: Vec<Decl>) -> Result<Vec<TypedDecl>, TypeAstError> {
+pub fn type_ast(ast: Vec<Decl>) -> Result<Vec<TypedDecl>, TypeAstErr> {
     let typed = ast
         .into_iter()
         .map(|decl| decl.type_ast())
@@ -355,12 +350,13 @@ fn collect_variants(
     Import {
         path: import.path,
         imported_ids: new_ids,
+        location: import.location,
     }
 }
 
 pub fn type_modules(
     modules: HashMap<String, Module>,
-) -> Result<HashMap<String, TypedModule>, TypeAstError> {
+) -> Result<HashMap<String, TypedModule>, LastLayerError> {
     let mut typed: HashMap<String, TypedModule> = modules
         .into_iter()
         .map(|(path, module)| {
@@ -368,7 +364,9 @@ pub fn type_modules(
                 .decls
                 .into_iter()
                 .map(|decl| decl.type_ast())
-                .collect::<Result<_, _>>()?;
+                .collect::<Result<_, _>>().map_err(|err| {
+                    LastLayerError::from_fe(err, path.clone())
+                })?;
             Ok((
                 path,
                 TypedModule {

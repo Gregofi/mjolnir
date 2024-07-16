@@ -4,13 +4,16 @@ use std::path::Path;
 
 use crate::ast::TypedModule;
 use crate::ast::{Import, Module};
-use crate::constants::{STD_INTERNAL_PREFIX, STD_NATIVE_MODULE};
+use crate::constants::STD_NATIVE_MODULE;
+use crate::location::Location;
 use anyhow::Result;
 use anyhow::{anyhow, Context};
+use error::LastLayerError;
 use log::debug;
 
 pub mod parser;
 // pub mod semantic_analysis;
+pub mod error;
 mod type_ast;
 pub mod type_inference;
 pub mod types;
@@ -74,20 +77,39 @@ pub fn get_canonical_import_path(
 /// imported twice. As a result, this must also transform all imports in modules to absolute path,
 /// since other operations later use the imports path as an unique ID for the module.
 ///
-fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>> {
+fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>, LastLayerError> {
     let mut visited: HashSet<String> = HashSet::new();
     let mut q: VecDeque<String> = VecDeque::new();
     let mut result: HashMap<String, Module> = HashMap::new();
 
-    q.push_back(get_absolute_path(&entrypoint).context("Could not find entrypoint file")?);
+    q.push_back(get_absolute_path(&entrypoint).map_err(|e| {
+        LastLayerError {
+            error: e.to_string(),
+            location: Location::new(0, 0),
+            module: entrypoint.to_string(),
+        }.with_context("Failed to canonicalize entrypoint path")
+    })?);
 
     // bfs
     while !q.is_empty() {
         let current = q.pop_front().unwrap();
         debug!("Parsing file: {}", current);
         let contents = std::fs::read_to_string(current.clone())
-            .with_context(|| format!("Failed to read file {}", current))?;
-        let (imports, decls) = parser::parse_ast(&contents)?;
+            .with_context(|| format!("Failed to read file {}", current))
+            .map_err(|e| {
+                LastLayerError {
+                    error: e.to_string(),
+                    location: Location::new(0, 0),
+                    module: current.clone(),
+                }
+            })?;
+        let (imports, decls) = parser::parse_ast(&contents).map_err(|e| {
+            LastLayerError {
+                error: e.message,
+                location: Location::new(e.location, e.location + 1),
+                module: current.clone(),
+            }
+        })?;
         // Transform imports to absolute shortests paths, to make them unique.
         let mut transformed_imports = vec![];
         // TODO: For now, handle only non std imports. When location of standard library is set
@@ -101,7 +123,11 @@ fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>> {
             let import_path =
                 get_canonical_import_path(Path::new(entrypoint), Path::new(&current), &import.path);
             if import_path.is_none() {
-                return Err(anyhow!("Could not find file '{}'", import.path));
+                return Err(LastLayerError {
+                    error: format!("Could not find file '{}'", import.path),
+                    location: import.location,
+                    module: current.clone(),
+                });
             }
             let import_path = canonicalize(import_path.unwrap())
                 .expect("Could not canonicalize path")
@@ -115,6 +141,7 @@ fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>> {
             transformed_imports.push(Import {
                 imported_ids: import.imported_ids.clone(),
                 path: import_path,
+                location: import.location,
             });
         }
         result.insert(
@@ -137,22 +164,18 @@ fn parse_files(entrypoint: &str) -> Result<HashMap<String, Module>> {
 pub fn fe_pass(files: HashMap<String, String>) -> Result<HashMap<String, TypedModule>> {
     let mut modules = HashMap::new();
     for (name, content) in files {
-        let (imports, decls) = parser::parse_ast(&content)?;
+        let (imports, decls) = parser::parse_ast(&content).map_err(|_| anyhow!("Parsing failed"))?;
         modules.insert(name, Module { imports, decls });
     }
-    let inferred = type_inference::type_infer_modules(modules)
-        .map_err(|e| anyhow!("Type inference failed: {}", e))?;
+    let inferred = type_inference::type_infer_modules(modules).map_err(|_| anyhow!("Type inference failed"))?;
     let typed =
-        type_ast::type_modules(inferred).map_err(|e| anyhow!("AST Typing failed: {}", e))?;
+        type_ast::type_modules(inferred).map_err(|_| anyhow!("AST Typing failed"))?;
     Ok(typed)
 }
 
 /// Starting from entrypoint file, parses and typechecks it and all files that it imports.
-pub fn parse_and_check_files(entrypoint: &str) -> Result<HashMap<String, TypedModule>> {
+pub fn parse_and_check_files(entrypoint: &str) -> Result<HashMap<String, TypedModule>, LastLayerError> {
     let modules = parse_files(entrypoint)?;
-    let inferred = type_inference::type_infer_modules(modules)
-        .map_err(|e| anyhow!("Type inference failed: {}", e))?;
-    let typed =
-        type_ast::type_modules(inferred).map_err(|e| anyhow!("AST Typing failed: {}", e))?;
-    Ok(typed)
+    let inferred = type_inference::type_infer_modules(modules)?;
+    type_ast::type_modules(inferred)
 }

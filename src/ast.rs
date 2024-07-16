@@ -10,18 +10,7 @@ use crate::frontend::utils::{
     GenericDeclaration, StronglyTypedIdentifier, TypedIdentifier, WeaklyTypedIdentifier,
     WrittenType,
 };
-
-#[derive(Clone, Debug)]
-pub struct Location {
-    pub line: usize,
-    pub column: usize,
-}
-
-impl Location {
-    pub fn new(line: usize, column: usize) -> Location {
-        Location { line, column }
-    }
-}
+use crate::location::Location;
 
 #[derive(Clone, Debug, Copy, PartialEq)]
 pub enum Operator {
@@ -198,6 +187,7 @@ pub struct EnumVariant {
 pub struct Import {
     pub path: String,
     pub imported_ids: Vec<String>,
+    pub location: Location,
 }
 
 /// Represents single module, a single module maps to a single file.
