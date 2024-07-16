@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use log::debug;
 use std::fmt::{self, Display, Formatter};
 use std::{collections::HashMap, rc::Rc};
 
@@ -49,7 +48,7 @@ struct StructValue {
     type_info: Rc<StructTemplate>,
 }
 
-pub enum Metadata {
+enum Metadata {
     StructMetadata(Rc<StructTemplate>),
     EnumMetadata(Rc<EnumTemplate>),
 }

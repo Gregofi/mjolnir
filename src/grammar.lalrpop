@@ -1,4 +1,5 @@
-use crate::ast::{StmtKind, Import, Module, ExprKind, Stmt, Expr, Location, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern, FunDecl};
+use crate::ast::{StmtKind, Import, Module, ExprKind, Stmt, Expr, Decl, DeclKind, Operator, VarDecl, EnumVariant, MatchArm, Pattern, FunDecl};
+use crate::location::Location;
 use crate::frontend::utils::{WeaklyTypedIdentifier, StronglyTypedIdentifier, WrittenType, GenericDeclaration, TypeDeclaration};
 use std::str::FromStr;
 
@@ -69,10 +70,11 @@ pub Module: (Vec<Import>, Vec<Decl>) = {
 }
 
 Import: Import = {
-    IMPORT LBRACE <imported_ids: Identifiers> RBRACE FROM <path: StringLiteral> SEMICOLON => {
+    <l: @L> IMPORT LBRACE <imported_ids: Identifiers> RBRACE FROM <path: StringLiteral> SEMICOLON <r: @R> => {
         Import {
             imported_ids,
             path: path.to_string(),
+            location: Location::new(l, r),
         }
     }
 }

@@ -1,44 +1,7 @@
-import { putchar, println, assert, readln } from "std/internal/native";
-
-enum Option[T] {
-    Some(T),
-    None,
-}
-
-impl Option[T] {
-    fn is_some(): Bool = match self {
-        Some(_) => true,
-        None => false,
-    }
-}
-
-enum List[T] {
-    Cons(T, List[T]),
-    Nil,
-}
-
-impl List[T] {
-    fn find(n: T): Bool = match self {
-        Cons(head, tail) if head == n => true,
-        Cons(head, tail) => tail.find(n),
-        Nil => false,
-    }
-
-    fn head(): Option[T] = match self {
-        Cons(head, _) => Some(head),
-        Nil => None(),
-    }
-}
-
-fn main(): Int = {
-    let lst = Cons(0, Cons(1, Cons(2, Cons(3, Nil()))));
-    assert(lst.find(2));
-    assert(lst.find(5) == false);
-    assert(match lst.head() {
-        Some(x) if x == 0 => true,
-        _ => false,
-    });
-    let s = Some(1);
-    assert(s.is_some());
-    0
+fn main(): Int = = {
+    let x = 1;
+    let y = 3;
+    x + 
+    y + 
+    3 + true
 }

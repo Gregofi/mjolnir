@@ -1,3 +1,4 @@
+use super::error::{FrontEndError, LastLayerError};
 /// Type inference module, uses Hindley-Milner type inference algorithm.
 /// Type inference consists of two main steps. First, it collects the types
 /// from all modules for global namespace (global functions, constants and type declarations)
@@ -14,13 +15,15 @@
 /// in the inference.
 // TODO: Check if the Rcs are truly necessary.
 use super::utils::{
-    GenericDeclaration, IdEnv, StronglyTypedIdentifier, WeaklyTypedIdentifier, WrittenType,
+    GenericDeclaration, IdEnv, StronglyTypedIdentifier, WrittenType,
 };
 use crate::ast::{
-    Decl, DeclKind, Expr, ExprKind, FunDecl, Module, Operator, Pattern, Stmt, StmtKind, VarDecl,
+    Decl, DeclKind, Expr, ExprKind, FunDecl, Module, Operator, Pattern, Stmt, StmtKind,
+    VarDecl,
 };
 use crate::backend::ast_interpreter::native_functions::get_native_functions;
 use crate::constants::STD_NATIVE_MODULE;
+use crate::location::Location;
 use log::debug;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -28,24 +31,14 @@ use std::fmt::Display;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
-pub enum TypeInferenceError {
-    TypeMismatch(String),
-    UnificationError(String),
+pub enum ErrorKind {
+    TypeMismatch,
+    UnificationError,
     /// When a type is expected, but none is found.
-    TypeExpected(String),
+    TypeExpected,
 }
 
-impl Display for TypeInferenceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TypeInferenceError::TypeMismatch(s) => write!(f, "Type mismatch: {}", s),
-            TypeInferenceError::UnificationError(s) => write!(f, "Unification error: {}", s),
-            TypeInferenceError::TypeExpected(s) => {
-                write!(f, "Type must be known at this point: {}", s)
-            }
-        }
-    }
-}
+type TypeInferenceError = FrontEndError<ErrorKind>;
 
 /// Generate new typevar
 fn new_typevar() -> Type {
@@ -134,7 +127,10 @@ impl Constructor<Type> {
             if self.type_vec.is_empty() {
                 Ok(t.clone())
             } else {
-                Err(TypeInferenceError::UnificationError(
+                Err(TypeInferenceError::new(
+                    ErrorKind::UnificationError,
+                    // TODO: Location
+                    Location::new(0, 0),
                     "Cannot replace type variable with a constructor that has generics".to_string(),
                 ))
             }
@@ -292,7 +288,7 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    fn unify(&mut self, t1: &Rc<Type>, t2: &Rc<Type>) -> Result<(), TypeInferenceError> {
+    fn unify(&mut self, t1: &Rc<Type>, t2: &Rc<Type>, location: Location) -> Result<(), TypeInferenceError> {
         debug!("Unifying ⟦{}⟧ = ⟦{}⟧", t1, t2);
         match (t1.as_ref(), t2.as_ref()) {
             // This is a quick fix, some programs would cause an unification of T?1 = T?1,
@@ -302,7 +298,7 @@ impl SymbolTable {
                 let t = self.unif_table.get(tv);
                 if let Some(t) = t {
                     debug!("Unifying type {} variable with type {}", t, t2);
-                    self.unify(&t.clone(), t2)?;
+                    self.unify(&t.clone(), t2, location)?;
                 }
 
                 self.unif_table.insert(*tv, t2.clone());
@@ -310,21 +306,25 @@ impl SymbolTable {
             (_, Type::TypeVar(tv)) => {
                 let t = self.unif_table.get(tv);
                 if let Some(t) = t {
-                    self.unify(&t.clone(), t1)?;
+                    self.unify(&t.clone(), t1, location)?;
                 }
 
                 self.unif_table.insert(*tv, t1.clone());
             }
             (Type::Constructor(c1), Type::Constructor(c2)) if c1.name == c2.name => {
                 for (t1, t2) in c1.type_vec.iter().zip(c2.type_vec.iter()) {
-                    self.unify(t1, t2)?;
+                    self.unify(t1, t2, location)?;
                 }
             }
             _ => {
-                return Err(TypeInferenceError::UnificationError(format!(
-                    "Unification error, cannot unify ⟦{}⟧ = ⟦{}⟧",
-                    t1, t2
-                )));
+                return Err(TypeInferenceError::new(
+                    ErrorKind::UnificationError,
+                    location,
+                    format!(
+                        "Type inference error, cannot unify type '{}' with type '{}'",
+                        t1, t2,
+                    ),
+                ));
             }
         }
         Ok(())
@@ -386,7 +386,8 @@ impl SymbolTable {
         let ret_ty = self.visit_expr(body)?;
         self.ids.pop();
 
-        self.unify(&ret_ty_stated, &ret_ty)?;
+        // TODO: Missing location here
+        self.unify(&ret_ty_stated, &ret_ty, Location::new(0,0))?;
 
         Ok(fun_ty.clone())
     }
@@ -495,7 +496,7 @@ impl SymbolTable {
                 self.ids.insert(name.clone(), scheme.clone());
                 *inferred_ty = Some((*scheme.ty).clone());
                 let value_ty = self.visit_expr(value)?;
-                self.unify(&var_ty, &value_ty)?;
+                self.unify(&var_ty, &value_ty, stmt.location)?;
             }
             StmtKind::Expr(expr) => {
                 self.visit_expr(expr)?;
@@ -513,10 +514,11 @@ impl SymbolTable {
             ExprKind::Identifier(id) => {
                 let ty = match self.ids.get(id) {
                     Some(ty) => ty.instantiate()?,
-                    None => Err(TypeInferenceError::TypeMismatch(format!(
-                        "Type variable not found for {}",
-                        id
-                    )))?,
+                    None => Err(TypeInferenceError::new(
+                        ErrorKind::TypeMismatch,
+                        expr.location,
+                        format!("Type {} not found", id),
+                    ))?,
                 };
                 Ok(ty)
             }
@@ -538,7 +540,7 @@ impl SymbolTable {
                 let ret_ty = new_typevar().into_rc();
                 let fun_ty = Type::create_function(arg_types, ret_ty.clone()).into_rc();
 
-                self.unify(&target_type, &fun_ty)?;
+                self.unify(&target_type, &fun_ty, expr.location)?;
 
                 Ok(ret_ty)
             }
@@ -547,9 +549,9 @@ impl SymbolTable {
                 let then_ty = self.visit_expr(then)?;
                 let else_ty = self.visit_expr(els)?;
 
-                self.unify(&cond_ty, &Type::create_constant("Bool".to_string()))?;
+                self.unify(&cond_ty, &Type::create_constant("Bool".to_string()), expr.location)?;
 
-                self.unify(&then_ty, &else_ty)?;
+                self.unify(&then_ty, &else_ty, expr.location)?;
 
                 Ok(then_ty)
             }
@@ -558,7 +560,7 @@ impl SymbolTable {
                 // comparison operator, the result must be a bool.
                 let lhs_ty = self.visit_expr(lhs)?;
                 let rhs_ty = self.visit_expr(rhs)?;
-                self.unify(&lhs_ty, &rhs_ty)?;
+                self.unify(&lhs_ty, &rhs_ty, expr.location)?;
 
                 match op {
                     Operator::Less
@@ -581,16 +583,16 @@ impl SymbolTable {
                         arm.pattern, target_ty
                     );
 
-                    self.unify_pattern(&arm.pattern, &target_ty)?;
+                    self.unify_pattern(&arm.pattern, &target_ty, target.location)?;
 
                     if let Some(arm_cond) = arm.cond.as_mut() {
                         let ty = self.visit_expr(arm_cond)?;
                         debug!("Unifying condition with type {}", ty);
-                        self.unify(&ty, &Type::create_constant("Bool".to_string()))?;
+                        self.unify(&ty, &Type::create_constant("Bool".to_string()), expr.location)?;
                     }
 
                     let arm_ty = self.visit_expr(&mut arm.body)?;
-                    self.unify(&ret_ty, &arm_ty)?;
+                    self.unify(&ret_ty, &arm_ty, expr.location)?;
                     self.ids.pop();
                 }
                 Ok(ret_ty)
@@ -624,10 +626,11 @@ impl SymbolTable {
                     Some(TypeMetadata::Struct(metadata)) => metadata.clone(), // clone for borrow
                     // checker
                     _ => {
-                        return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Struct {} not found; name used as struct initializer",
-                            name
-                        )));
+                        return Err(TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                            expr.location,
+                            format!("Struct {} not found; name used as struct initializer", name),
+                        ));
                     }
                 };
 
@@ -638,15 +641,16 @@ impl SymbolTable {
                     let field_ty = match fields_typed.get(field_name) {
                         Some(ty) => ty,
                         None => {
-                            return Err(TypeInferenceError::TypeMismatch(format!(
-                                "Field {} not found in struct {}",
-                                field_name, name
-                            )));
+                            return Err(TypeInferenceError::new(
+                                ErrorKind::TypeMismatch,
+                                expr.location,
+                                format!("Field {} not found in struct {}", field_name, name),
+                            ));
                         }
                     };
 
                     let expr_ty = self.visit_expr(field_expr)?;
-                    self.unify(&expr_ty, field_ty)?;
+                    self.unify(&expr_ty, field_ty, expr.location)?;
                 }
 
                 Ok(Type::Constructor(struct_type).into_rc())
@@ -658,7 +662,9 @@ impl SymbolTable {
                 let cons = match closed_ty.as_ref() {
                     Type::Constructor(cons) => cons,
                     _ => {
-                        return Err(TypeInferenceError::TypeMismatch(
+                        return Err(TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                        expr.location,
                             "The type of the struct must be known at this point".to_string(),
                         ));
                     }
@@ -675,10 +681,14 @@ impl SymbolTable {
                         methods, generics, ..
                     }) => (&HashMap::new(), methods, generics),
                     _ => {
-                        return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Target type {} not found when accessing member {}",
-                            cons.name, member
-                        )));
+                        return Err(TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                        expr.location,
+                            format!(
+                                "Target type {} not found when accessing member {}",
+                                cons.name, member
+                            ),
+                        ));
                     }
                 };
 
@@ -687,10 +697,11 @@ impl SymbolTable {
                 } else if let Some(ty) = methods.get(member) {
                     ty.instantiate()?
                 } else {
-                    return Err(TypeInferenceError::TypeMismatch(format!(
-                        "Member {} not found in struct {}",
-                        member, cons.name
-                    )));
+                    return Err(TypeInferenceError::new(
+                        ErrorKind::TypeMismatch,
+                        expr.location,
+                        format!("Member {} not found in struct {}", member, cons.name),
+                    ));
                 };
 
                 let types = generics.iter().zip(cons.type_vec.iter()).fold(
@@ -739,26 +750,28 @@ impl SymbolTable {
         &mut self,
         pattern: &Pattern,
         target_ty: &Rc<Type>,
+        location: Location,
     ) -> Result<(), TypeInferenceError> {
         match (pattern, target_ty.as_ref()) {
             (Pattern::Wildcard, _) => Ok(()),
             (Pattern::Int(_), _) => {
-                self.unify(target_ty, &Type::create_constant("Int".to_string()))
+                self.unify(target_ty, &Type::create_constant("Int".to_string()), location)
             }
             (Pattern::Boolean(_), _) => {
-                self.unify(target_ty, &Type::create_constant("Bool".to_string()))
+                self.unify(target_ty, &Type::create_constant("Bool".to_string()), location)
             }
             (Pattern::String(_), _) => {
-                self.unify(target_ty, &Type::create_constant("String".to_string()))
+                self.unify(target_ty, &Type::create_constant("String".to_string()), location)
             }
             (Pattern::Struct { name, fields }, _) => {
                 let struct_metadata = match self.type_ids.get(name) {
                     Some(TypeMetadata::Struct(metadata)) => metadata,
                     _ => {
-                        return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Struct {} not found when matching patterns",
-                            name
-                        )));
+                        return Err(TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                            location,
+                            format!("Struct {} not found when matching patterns", name),
+                        ));
                     }
                 };
 
@@ -766,18 +779,20 @@ impl SymbolTable {
                 let c = match closed_target.as_ref() {
                     Type::Constructor(c) => c,
                     _ => {
-                        return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Type must be known at this point: {}",
-                            target_ty
-                        )));
+                        return Err(TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                            location,
+                            format!("Type must be known at this point: {}", target_ty),
+                        ));
                     }
                 };
 
                 if c.name != *name {
-                    return Err(TypeInferenceError::TypeMismatch(format!(
-                        "Expected struct {}, got {}",
-                        name, c.name
-                    )));
+                    return Err(TypeInferenceError::new(
+                        ErrorKind::TypeMismatch,
+                        location,
+                        format!("Expected struct {}, got {}", name, c.name),
+                    ));
                 }
 
                 let struct_type = struct_metadata.instantiate_struct(c)?;
@@ -786,10 +801,12 @@ impl SymbolTable {
                     let field_ty = match struct_type.get(field) {
                         Some(ty) => ty.as_ref().clone(),
                         None => {
-                            return Err(TypeInferenceError::TypeMismatch(format!(
-                                "Field {} not found in struct {}",
-                                field, name
-                            )));
+                            return Err(TypeInferenceError::new(
+                                ErrorKind::TypeMismatch,
+
+                        location,
+                                format!("Field {} not found in struct {}", field, name),
+                            ));
                         }
                     };
                     self.ids.insert(field.clone(), field_ty.into_scheme());
@@ -805,10 +822,11 @@ impl SymbolTable {
                 // to the return type of the constructor.
                 let variant_cons = match self.ids.get(name) {
                     Some(cons) => Ok(cons),
-                    None => Err(TypeInferenceError::TypeMismatch(format!(
-                        "Enum constructor not found for {}",
-                        name
-                    ))),
+                    None => Err(TypeInferenceError::new(
+                        ErrorKind::TypeMismatch,
+                        location,
+                        format!("Enum constructor not found for {}", name),
+                    )),
                 }?;
 
                 // The order of generics correspond to the order of the types in the return
@@ -819,10 +837,11 @@ impl SymbolTable {
                 let instantiated_generics = match finalized_target.as_ref() {
                     Type::Constructor(Constructor { type_vec, .. }) => type_vec,
                     _ => {
-                        return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Type must be known at this point: {}",
-                            target_ty
-                        )));
+                        return Err(TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                        location,
+                            format!("Type must be known at this point: {}", target_ty),
+                        ));
                     }
                 };
 
@@ -844,16 +863,17 @@ impl SymbolTable {
                 let cons = match cons_inst.as_ref() {
                     Type::Constructor(cons) => cons,
                     _ => {
-                        return Err(TypeInferenceError::TypeMismatch(format!(
-                            "Expected constructor, got {}",
-                            cons_inst
-                        )));
+                        return Err(TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                        location,
+                            format!("Expected constructor, got {}", cons_inst),
+                        ));
                     }
                 };
 
                 let params = cons.type_vec[1..].iter();
                 for (pattern, ty) in patterns.iter().zip(params) {
-                    self.unify_pattern(pattern, ty)?;
+                    self.unify_pattern(pattern, ty, location)?;
                 }
                 Ok(())
             }
@@ -868,6 +888,7 @@ impl SymbolTable {
                             patterns: vec![],
                         }),
                         target_ty,
+                        location,
                     );
                 }
                 self.ids.insert(name.clone(), (*ty).clone().into_scheme());
@@ -882,10 +903,10 @@ impl SymbolTable {
         match ty.as_ref() {
             Type::TypeVar(TypeVar(id)) => {
                 let t = self.unif_table.get(&TypeVar(*id)).ok_or_else(|| {
-                    TypeInferenceError::UnificationError(format!(
-                        "Did not find Type variable ?T{} in unification table",
+                    panic!(
+                        "Type variable {} not found in unification table, this should not happen",
                         id
-                    ))
+                    )
                 })?;
                 self.close_type(t)
             }
@@ -980,10 +1001,14 @@ impl SymbolTable {
                 let finalized_ty = if let Some(ty) = inferred_ty {
                     self.close_type(&ty.into_rc())?
                 } else {
-                    return Err(TypeInferenceError::UnificationError(format!(
-                        "Type inference failed, did not find type variable for {}",
-                        name
-                    )));
+                    return Err(TypeInferenceError::new(
+                        ErrorKind::UnificationError,
+                        stmt.location,
+                        format!(
+                            "Type inference failed, did not find type variable for {}",
+                            name
+                        ),
+                    ));
                 };
                 StmtKind::VarDecl(VarDecl {
                     name,
@@ -1009,7 +1034,9 @@ impl SymbolTable {
         let inferred_ty = if let Some(ty) = expr.inferred_ty {
             Some(self.close_type(&ty)?)
         } else {
-            return Err(TypeInferenceError::UnificationError(
+            return Err(TypeInferenceError::new(
+                ErrorKind::UnificationError,
+                expr.location,
                 "Type inference failed, did not find type variable".to_string(),
             ));
         };
@@ -1022,13 +1049,15 @@ impl SymbolTable {
 }
 
 impl FunDecl {
-    fn to_typescheme(&self) -> Result<TypeScheme, TypeInferenceError> {
+    fn to_typescheme(&self, location: Location) -> Result<TypeScheme, TypeInferenceError> {
         let mut typed_params = vec![];
         for param in &self.parameters {
             let ty = param
                 .ty
                 .clone()
-                .ok_or(TypeInferenceError::TypeExpected(
+                .ok_or(TypeInferenceError::new(
+                    ErrorKind::TypeExpected,
+                    location,
                     "Function parameter".to_string(),
                 ))?
                 .into_type()
@@ -1039,7 +1068,9 @@ impl FunDecl {
         let ret_ty_stated = self
             .return_type
             .clone()
-            .ok_or(TypeInferenceError::TypeExpected(
+            .ok_or(TypeInferenceError::new(
+                ErrorKind::TypeExpected,
+                location,
                 "Function return type".to_string(),
             ))?
             .into_type()
@@ -1067,10 +1098,11 @@ fn fill_methods(module: Module) -> Result<Module, TypeInferenceError> {
             } => {
                 let exists = impls.insert(target.clone(), methods);
                 if exists.is_some() {
-                    return Err(TypeInferenceError::TypeMismatch(format!(
-                        "Multiple impl blocks for struct {}",
-                        target
-                    )));
+                    return Err(TypeInferenceError::new(
+                        ErrorKind::TypeMismatch,
+                        decl.location,
+                        format!("Multiple impl blocks for struct {}", target),
+                    ));
                 }
             }
             _ => rest.push(decl),
@@ -1148,7 +1180,10 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
 
                 let methods = methods
                     .iter()
-                    .map(|method| Ok((method.name.clone(), method.to_typescheme()?)))
+                    // TODO: This location is pointing at the struct, because we essentially
+                    // lose the location of impl blocks. We should store the location of the
+                    // impl block in the AST.
+                    .map(|method| Ok((method.name.clone(), method.to_typescheme(decl.location)?)))
                     .collect::<Result<HashMap<_, _>, _>>()?;
 
                 module_metadata.types.insert(
@@ -1166,7 +1201,7 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
             DeclKind::FunDecl(fun) => {
                 let name = fun.name.clone();
 
-                let fun_typescheme = fun.to_typescheme()?;
+                let fun_typescheme = fun.to_typescheme(decl.location)?;
 
                 debug!("Adding function {} with type {}", name, fun_typescheme.ty);
                 module_metadata.ids.insert(name.clone(), fun_typescheme);
@@ -1210,7 +1245,8 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
                         variant_names: variants.iter().map(|v| v.name.clone()).collect(),
                         methods: methods
                             .iter()
-                            .map(|method| Ok((method.name.clone(), method.to_typescheme()?)))
+                            // TODO: Again, bad location
+                            .map(|method| Ok((method.name.clone(), method.to_typescheme(decl.location)?)))
                             .collect::<Result<HashMap<_, _>, _>>()?,
                         generics: generics.iter().map(|g| g.name.clone()).collect(),
                     },
@@ -1226,17 +1262,25 @@ fn precollect_types(module: &Module) -> Result<ModuleMetadata, TypeInferenceErro
 /// Returns the same decls with the inferred types filled.
 pub fn type_infer_modules(
     modules: HashMap<String, Module>,
-) -> Result<HashMap<String, Module>, TypeInferenceError> {
+) -> Result<HashMap<String, Module>, LastLayerError> {
     // Move methods from 'Impl' blocks into the structures
     let modules = modules
         .into_iter()
-        .map(|(name, module)| Ok((name, fill_methods(module)?)))
+        .map(|(name, module)| Ok((name.clone(), fill_methods(module).map_err(|e| LastLayerError{
+            location: e.location,
+            error: e.error,
+            module: name.clone(),
+        })?)))
         .collect::<Result<HashMap<_, _>, _>>()?;
 
     // First, we need to collect all the types from all the modules.
     let mut module_metadata = modules
         .iter()
-        .map(|(name, module)| Ok((name.clone(), precollect_types(module)?)))
+        .map(|(name, module)| Ok((name.clone(), precollect_types(module).map_err(|e| LastLayerError{
+            location: e.location,
+            error: e.error,
+            module: name.clone(),
+        })?)))
         .collect::<Result<HashMap<_, _>, _>>()?;
 
     // Also native functions
@@ -1269,10 +1313,15 @@ pub fn type_infer_modules(
             for import in &module.imports {
                 let imported_module_metadata =
                     module_metadata.get(&import.path).ok_or_else(|| {
-                        TypeInferenceError::TypeMismatch(format!(
-                            "Module {} not found in imports",
-                            import.path
-                        ))
+                        TypeInferenceError::new(
+                            ErrorKind::TypeMismatch,
+                            import.location,
+                            format!("Module {} not found in imports", import.path),
+                        )
+                    }).map_err(|e| LastLayerError{
+                        location: e.location,
+                        error: e.error,
+                        module: name.clone(),
                     })?;
 
                 for named_import in &import.imported_ids {
@@ -1285,7 +1334,11 @@ pub fn type_infer_modules(
             // Do the actual type inference
             for decl in &mut module.decls {
                 // TODO: Shouldn't we push a new scope here?
-                symbol_table.borrow_mut().visit_decl(decl)?;
+                symbol_table.borrow_mut().visit_decl(decl).map_err(|o| LastLayerError{
+                    location: o.location,
+                    error: o.error,
+                    module: name.clone(),
+                })?;
             }
 
             // Fold over (or rather for-each) over all the AST nodes and finalize the types (remove
@@ -1300,7 +1353,11 @@ pub fn type_infer_modules(
                         &|expr| symbol_table.borrow_mut().finalize_expr(expr),
                     )
                 })
-                .collect::<Result<Vec<Decl>, _>>()?;
+                .collect::<Result<Vec<Decl>, _>>().map_err(|e| LastLayerError{
+                    location: e.location,
+                    error: e.error,
+                    module: name.clone(),
+                })?;
             Ok((
                 name,
                 Module {
@@ -1353,7 +1410,7 @@ mod tests {
         assert!(regex.is_match(&filled.to_string()));
     }
 
-    fn infer_module(code: &str) -> Result<Vec<Decl>, TypeInferenceError> {
+    fn infer_module(code: &str) -> Result<Vec<Decl>, LastLayerError> {
         let decls = parse_ast(code).unwrap().1;
         let mut modules = HashMap::new();
         modules.insert(
@@ -1630,6 +1687,7 @@ fn bar(x: Int): Int = x * 2
                 imports: vec![Import {
                     path: "/foobar".to_string(),
                     imported_ids: vec!["foo".to_string(), "bar".to_string()],
+                    location: Location::new(0, 0),
                 }],
             },
         );
@@ -1681,6 +1739,7 @@ fn double_value(x: Int): Int = x * 2
                 imports: vec![Import {
                     path: "/f2".to_string(),
                     imported_ids: vec!["foo".to_string(), "bar".to_string()],
+                    location: Location::new(0, 0),
                 }],
             },
         );
@@ -1692,6 +1751,7 @@ fn double_value(x: Int): Int = x * 2
                 imports: vec![Import {
                     path: "/f3".to_string(),
                     imported_ids: vec!["double_value".to_string()],
+                    location: Location::new(0, 0),
                 }],
             },
         );
@@ -1730,6 +1790,7 @@ fn double_value(x: Int): Int = x * 2
                 imports: vec![Import {
                     path: STD_NATIVE_MODULE.to_string(),
                     imported_ids: vec!["non_existing_function".to_string()],
+                    location: Location::new(0, 0),
                 }],
             },
         );
@@ -1759,6 +1820,7 @@ fn double_value(x: Int): Int = x * 2
                 imports: vec![Import {
                     path: "/non_existing_module".to_string(),
                     imported_ids: vec!["non_existing_function".to_string()],
+                    location: Location::new(0, 0),
                 }],
             },
         );
@@ -1795,6 +1857,7 @@ fn double_value(x: Int): Int = x * 2
                 imports: vec![Import {
                     path: "/imported_module".to_string(),
                     imported_ids: vec!["imported_function".to_string()],
+                    location: Location::new(0, 0),
                 }],
             },
         );
@@ -1833,6 +1896,7 @@ fn main(): Int = {
                 imports: vec![Import {
                     path: STD_NATIVE_MODULE.to_string(),
                     imported_ids: vec!["pow".to_string(), "assert".to_string()],
+                    location: Location::new(0, 0),
                 }],
             },
         );
