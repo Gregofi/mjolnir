@@ -10,12 +10,12 @@ use frontend::type_inference::TypeScheme;
 #[derive(Clone, Debug)]
 pub struct NativeFunction {
     pub name: String,
-    pub body: fn(Vec<Value>) -> Result<Value>,
+    pub body: fn(Vec<Rc<Value>>) -> Result<Rc<Value>>,
     pub ty: TypeScheme,
 }
 
 impl NativeFunction {
-    pub fn new(name: String, body: fn(Vec<Value>) -> Result<Value>, ty: TypeScheme) -> Self {
+    pub fn new(name: String, body: fn(Vec<Rc<Value>>) -> Result<Rc<Value>>, ty: TypeScheme) -> Self {
         Self { name, body, ty }
     }
 }
@@ -29,12 +29,12 @@ impl Type {
     }
 }
 
-fn _native_assert(args: Vec<Value>) -> Result<Value> {
+fn _native_assert(args: Vec<Rc<Value>>) -> Result<Rc<Value>> {
     if args.len() != 1 {
         return Err(anyhow::anyhow!("Expected 1 argument, got {}", args.len()));
     }
 
-    match &args[0] {
+    match &*args[0] {
         Value::Bool(b) => {
             if !(*b) {
                 return Err(anyhow::anyhow!("Assertion failed"));
@@ -42,7 +42,7 @@ fn _native_assert(args: Vec<Value>) -> Result<Value> {
         }
         _ => return Err(anyhow::anyhow!("Expected boolean")),
     };
-    Ok(Value::Unit)
+    Ok(Value::Unit.into())
 }
 
 fn native_putchar() -> NativeFunction {
@@ -53,10 +53,10 @@ fn native_putchar() -> NativeFunction {
                 return Err(anyhow::anyhow!("Expected 1 argument, got {}", args.len()));
             }
 
-            match &args[0] {
+            match &*args[0] {
                 Value::Char(c) => {
                     print!("{}", *c as char);
-                    Ok(Value::Unit)
+                    Ok(Value::Unit.into())
                 }
                 _ => Err(anyhow::anyhow!("Expected char")),
             }
@@ -79,11 +79,11 @@ fn native_getchar() -> NativeFunction {
             let x = std::io::stdin().bytes().next();
             if x.is_none() {
                 // eof
-                Ok(Value::Char(0))
+                Ok(Value::Char(0).into())
             } else {
                 let x = x.unwrap();
                 match x {
-                    Ok(c) => Ok(Value::Char(c)),
+                    Ok(c) => Ok(Value::Char(c).into()),
                     Err(e) => Err(anyhow::anyhow!("Error reading char: {}", e)),
                 }
             }
@@ -118,8 +118,8 @@ fn native_pow() -> NativeFunction {
                 return Err(anyhow::anyhow!("Expected 2 arguments, got {}", args.len()));
             }
 
-            match (&args[0], &args[1]) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a.pow(*b as u32))),
+            match (&*args[0], &*args[1]) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a.pow(*b as u32)).into()),
                 _ => Err(anyhow::anyhow!("Expected two integers")),
             }
         },
