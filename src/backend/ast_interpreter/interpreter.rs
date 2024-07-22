@@ -44,7 +44,7 @@ pub struct EnumTemplate {
 #[derive(Clone, Debug)]
 struct StructValue {
     name: String,
-    fields: HashMap<String, Value>,
+    fields: HashMap<String, Rc<Value>>,
     type_info: Rc<StructTemplate>,
 }
 
@@ -79,7 +79,7 @@ pub enum Value {
     Variant {
         /// Name of the variant of the enum
         name: String,
-        fields: Rc<Vec<Value>>,
+        fields: Vec<Rc<Value>>,
         parent_enum: Rc<EnumTemplate>,
     },
 }
@@ -115,7 +115,7 @@ impl Display for Value {
 #[derive(Clone, Debug)]
 struct CallEnvironment {
     /// Each item in the vector is a new layer of scope
-    env: Vec<HashMap<String, Value>>,
+    env: Vec<HashMap<String, Rc<Value>>>,
     /// The current module that is being interpreted
     /// To know from where to take globals.
     current_module: String,
@@ -129,14 +129,14 @@ impl CallEnvironment {
         }
     }
 
-    pub fn add_identifier(&mut self, name: String, value: Value) {
+    pub fn add_identifier(&mut self, name: String, value: Rc<Value>) {
         self.env
             .last_mut()
             .expect("No environment, use push first!")
             .insert(name, value);
     }
 
-    pub fn get_identifier(&self, name: &String) -> Option<&Value> {
+    pub fn get_identifier(&self, name: &String) -> Option<&Rc<Value>> {
         self.env.iter().rev().find_map(|env| env.get(name))
     }
 
@@ -175,14 +175,14 @@ impl CallStack {
         self.stack.pop();
     }
 
-    pub fn add_identifier(&mut self, name: String, value: Value) {
+    pub fn add_identifier(&mut self, name: String, value: Rc<Value>) {
         self.stack
             .last_mut()
             .expect("No environment, use push first!")
             .add_identifier(name, value);
     }
 
-    pub fn get_identifier(&self, name: &String) -> Option<&Value> {
+    pub fn get_identifier(&self, name: &String) -> Option<&Rc<Value>> {
         self.stack
             .last()
             .expect("No environment, use push first!")
@@ -275,7 +275,7 @@ impl From<TypedModule> for NamedModule {
 
 pub struct Interpreter {
     call_stack: CallStack,
-    globals: ModuleMap<Value>,
+    globals: ModuleMap<Rc<Value>>,
     struct_metadata: ModuleMap<Rc<StructTemplate>>,
     modules: HashMap<String, NamedModule>,
 }
@@ -298,7 +298,7 @@ impl Interpreter {
                                 env: vec![HashMap::new()],
                                 current_module: module_name.clone(),
                             },
-                        });
+                        }.into());
                         globals.add(module_name.clone(), name.clone(), fun.unwrap());
                     }
                     TypedDeclKind::EnumDecl {
@@ -339,7 +339,7 @@ impl Interpreter {
                                 name: name.clone(),
                                 param_cnt,
                                 parent_enum: parent_enum.clone(),
-                            };
+                            }.into();
                             globals.add(module_name.clone(), name, cons);
                         }
                     }
@@ -391,9 +391,9 @@ impl Interpreter {
     pub fn try_match(
         &self,
         pattern: &Pattern,
-        match_target: &Value,
-    ) -> Option<HashMap<String, Value>> {
-        match (pattern, match_target) {
+        match_target: &Rc<Value>,
+    ) -> Option<HashMap<String, Rc<Value>>> {
+        match (pattern, &**match_target) {
             (Pattern::Wildcard, _) => Some(HashMap::new()),
             (Pattern::Int(pval), Value::Integer(vval)) if pval == vval => Some(HashMap::new()),
             (Pattern::Boolean(pval), Value::Bool(vval)) if pval == vval => Some(HashMap::new()),
@@ -502,10 +502,10 @@ impl Interpreter {
     pub fn interpret_function(
         &mut self,
         target: &Box<TypedExpr>,
-        args: Vec<Value>,
-    ) -> Result<Value> {
+        args: Vec<Rc<Value>>,
+    ) -> Result<Rc<Value>> {
         let resulting_function = self.interpret_expr(target)?;
-        match resulting_function {
+        match &*resulting_function {
             Value::Function {
                 body,
                 parameters,
@@ -529,11 +529,11 @@ impl Interpreter {
                 name, parent_enum, ..
             } => {
                 let result = Value::Variant {
-                    name,
-                    fields: Rc::new(args),
+                    name: name.clone(),
+                    fields: args,
                     parent_enum: parent_enum.clone(),
                 };
-                Ok(result)
+                Ok(result.into())
             }
             _ => Err(anyhow!(
                 "Target of function call must be a function; Should be caught by semantic analysis"
@@ -541,12 +541,12 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret_expr(&mut self, expr: &TypedExpr) -> Result<Value> {
+    pub fn interpret_expr(&mut self, expr: &TypedExpr) -> Result<Rc<Value>> {
         match &expr.node {
-            ExprKind::Unit => Ok(Value::Unit),
-            ExprKind::Int(int) => Ok(Value::Integer(*int)),
-            ExprKind::Boolean(bool) => Ok(Value::Bool(*bool)),
-            ExprKind::Char(c) => Ok(Value::Char(*c)),
+            ExprKind::Unit => Ok(Value::Unit.into()),
+            ExprKind::Int(int) => Ok(Value::Integer(*int).into()),
+            ExprKind::Boolean(bool) => Ok(Value::Bool(*bool).into()),
+            ExprKind::Char(c) => Ok(Value::Char(*c).into()),
             ExprKind::Identifier(id) => {
                 let mut value = self.call_stack.get_identifier(id);
                 if value.is_none() {
@@ -578,12 +578,12 @@ impl Interpreter {
                 let args = args
                     .iter()
                     .map(|arg| self.interpret_expr(arg))
-                    .collect::<Result<Vec<Value>>>()?;
+                    .collect::<Result<Vec<Rc<Value>>>>()?;
                 self.interpret_function(target, args)
             }
             ExprKind::If { cond, then, els } => {
                 let cond_val = self.interpret_expr(cond)?;
-                match cond_val {
+                match *cond_val {
                     Value::Bool(true) => self.interpret_expr(then),
                     Value::Bool(false) => self.interpret_expr(els),
                     _ => Err(anyhow!("If condition must be boolean")),
@@ -592,14 +592,14 @@ impl Interpreter {
             ExprKind::Binary { op, lhs, rhs } => {
                 let lhs_val = self.interpret_expr(lhs)?;
                 let rhs_val = self.interpret_expr(rhs)?;
-                match (lhs_val, rhs_val) {
+                match (&*lhs_val, &*rhs_val) {
                     (Value::Bool(lhs), Value::Bool(rhs)) => {
                         let res = match op {
                             Operator::Equal => Value::Bool(lhs == rhs),
                             Operator::Neq => Value::Bool(lhs != rhs),
                             _ => panic!("Invalid operator for boolean values"),
                         };
-                        Ok(res)
+                        Ok(res.into())
                     }
                     (Value::Char(lhs), Value::Char(rhs)) => {
                         let res = match op {
@@ -609,10 +609,10 @@ impl Interpreter {
                             Operator::Greater => Value::Bool(lhs > rhs),
                             Operator::LessEqual => Value::Bool(lhs <= rhs),
                             Operator::GreaterEqual => Value::Bool(lhs >= rhs),
-                            Operator::Sub => Value::Integer(lhs as i64 - rhs as i64),
+                            Operator::Sub => Value::Integer(*lhs as i64 - *rhs as i64),
                             _ => panic!("Invalid operator for char values"),
                         };
-                        Ok(res)
+                        Ok(res.into())
                     }
                     (Value::Integer(lhs), Value::Integer(rhs)) => {
                         let res = match op {
@@ -628,7 +628,7 @@ impl Interpreter {
                             Operator::LessEqual => Value::Bool(lhs <= rhs),
                             Operator::GreaterEqual => Value::Bool(lhs >= rhs),
                         };
-                        Ok(res)
+                        Ok(res.into())
                     }
                     _ => panic!(
                         "Invalid types for binary operator, should be catched by semantic analysis"
@@ -642,12 +642,12 @@ impl Interpreter {
                     if let Some(ids) = ids {
                         self.call_stack.get_env().push();
                         for (id, value) in ids {
-                            self.call_stack.add_identifier(id, value);
+                            self.call_stack.add_identifier(id, value.into());
                         }
 
                         if let Some(cond) = arm.cond.as_ref() {
                             let cond_val = self.interpret_expr(cond)?;
-                            if let Value::Bool(x) = cond_val {
+                            if let Value::Bool(x) = *cond_val {
                                 if !x {
                                     self.call_stack.get_env().pop();
                                     continue;
@@ -671,7 +671,7 @@ impl Interpreter {
                 let vals = fields
                     .iter()
                     .map(|(name, expr)| Ok((name.clone(), self.interpret_expr(expr)?)))
-                    .collect::<Result<HashMap<String, Value>>>()?;
+                    .collect::<Result<HashMap<String, Rc<Value>>>>()?;
                 // TODO: Resolve through imports
                 let type_info = self
                     .struct_metadata
@@ -682,11 +682,11 @@ impl Interpreter {
                     name: name.clone(),
                     fields: vals,
                     type_info,
-                }))
+                }).into())
             }
             ExprKind::MemberAccess { target, member } => {
                 let target_val = self.interpret_expr(target)?;
-                let (member, method, module) = match &target_val {
+                let (member, method, module) = match &*target_val {
                     Value::Struct(StructValue {
                         fields, type_info, ..
                     }) => {
@@ -713,7 +713,7 @@ impl Interpreter {
                             body: m.body.clone(),
                             parameters: m.parameters.clone(),
                             env,
-                        }
+                        }.into()
                     }),
                     (None, None) => Err(anyhow!("Member not found")),
                 }
@@ -725,7 +725,7 @@ impl Interpreter {
                     body: fun.body.clone().into(),
                     parameters,
                     env: self.call_stack.get_env().clone(),
-                })
+                }.into())
             }
         }
     }
@@ -748,7 +748,7 @@ impl Interpreter {
             self.globals.add(
                 STD_NATIVE_MODULE.to_string(),
                 native_function.name.clone(),
-                Value::NativeFunction(native_function),
+                Value::NativeFunction(native_function).into(),
             );
         }
     }
@@ -769,7 +769,7 @@ impl Interpreter {
         let main_module = mains[0].0.clone(); // TODO: Ugly, but cant simply do (x, y) = mains[0], since one is ref.
         let main = mains[0].1;
 
-        let main_body = match main {
+        let main_body = match &**main {
             Value::Function { body, .. } => {
                 body.clone() // FIXME: borrow checker is not happy
             }
@@ -778,7 +778,7 @@ impl Interpreter {
 
         self.call_stack.push_call(main_module);
         let val = self.interpret_expr(&main_body)?;
-        match val {
+        match *val {
             Value::Integer(x) if (0..256).contains(&x) => Ok(x.try_into().unwrap()),
             Value::Integer(_) => Err(anyhow!(
                 "Main function must return unit or integer between 0 and 255"
