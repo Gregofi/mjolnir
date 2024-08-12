@@ -5,7 +5,8 @@ import { Result } from "../stdlib/result.mjl";
 import { readline } from "../stdlib/io.mjl";
 
 fn main(): Int = {
-    let line = readline();
-    line.println();
-    0
+    let num1 = readline().parse_int();
+    let num2 = readline().parse_int();
+
+    num1.ok_or(0) + num2.ok_or(0)
 }

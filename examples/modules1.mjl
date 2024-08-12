@@ -1,8 +1,29 @@
-import { abs } from "../stdlib/math.mjl";
-import { assert } from "std/internal/native";
+enum Option[T] {
+    Some(T),
+    None,
+}
+
+enum List[T] {
+    Cons(T, List[T]),
+    Nil,
+}
+
+fn append[T](list: List[T], elem: T): List[T] = match list {
+    Nil() => Cons(elem, Nil()),
+    Cons(head, tail) => Cons(head, append(tail, elem)),
+}
+
+fn front[T](list: List[T]): Option[T] = match list {
+    Cons(head, _) => Some(head),
+    Nil() => None(),
+}
+
 
 fn main(): Int = {
-    assert(abs(2) == 2);
-    assert(abs(0 - 2) == 2);
-    0
+    let lst = Nil();
+    let appended = Cons(1, lst);
+    match front(appended) {
+        Some(x) => x,
+        None() => 0,
+    }
 }

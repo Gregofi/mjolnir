@@ -24,7 +24,7 @@ fn _read_delim(delim: Char): List[Char] = {
 /// Returns None if EOF.
 fn read_char(): Option[Char] = {
     let x = getchar();
-    if x == '0' {
+    if x == '`' {
         None()
     } else {
         Some(x)

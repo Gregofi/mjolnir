@@ -343,6 +343,7 @@ Patterns: Vec<Pattern> = Separated<Pattern, COMMA>;
 Pattern: Pattern = {
     UNDERSCORE => Pattern::Wildcard,
     NUMBER => Pattern::Int(i64::from_str(<>).unwrap()),
+    CHAR => Pattern::Char(<>.chars().nth(1).unwrap() as u8),
     TRUE => Pattern::Boolean(true),
     FALSE => Pattern::Boolean(false),
     DOUBLE_QUOTE <id: Identifier> DOUBLE_QUOTE => Pattern::String(id),
@@ -459,7 +460,7 @@ CharExpr: Expr = {
                 "'\\n'" => '\n',
                 "'\\t'" => '\t',
                 "'\\r'" => '\r',
-                "'\\0'" => '\0',
+                "'\\0'" => '`',
                 _ => c.chars().nth(1).unwrap(),
             };
             c as u8
