@@ -1,0 +1,18 @@
+import { String, from_list, char_to_int, int_to_char } from "../stdlib/string.mjl";
+import { List } from "../stdlib/list.mjl";
+import { Result } from "../stdlib/result.mjl";
+import { Option } from "../stdlib/option.mjl";
+import { assert } from "std/internal/native";
+
+fn main(): Int = {
+    assert(char_to_int('0').is_ok());
+
+    let str1 = from_list(Cons('3', Nil()));
+    assert(str1.length() == 1);
+    assert(match str1.parse_int() {
+        Ok(n) if n == 3 => true,
+        _ => false,
+    });
+
+    0
+}

@@ -312,6 +312,7 @@ impl SymbolTable {
             (_, Type::TypeVar(tv)) => {
                 let t = self.unif_table.get(tv);
                 if let Some(t) = t {
+                    debug!("Unifying type {} with type {}", t, t2);
                     self.unify(&t.clone(), t1, location)?;
                 }
 
@@ -538,13 +539,18 @@ impl SymbolTable {
                 ret
             }
             ExprKind::FunCall { target, args } => {
+                // target
                 let target_type = self.visit_expr(target)?;
+
                 let arg_types = args
                     .iter_mut()
                     .map(|arg| self.visit_expr(arg))
                     .collect::<Result<_, _>>()?;
                 let ret_ty = new_typevar().into_rc();
+                // fun ty
                 let fun_ty = Type::create_function(arg_types, ret_ty.clone()).into_rc();
+
+                debug!("Unifying target type {:#?} with function type {:#?}", target_type, fun_ty);
 
                 self.unify(&target_type, &fun_ty, expr.location)?;
 
@@ -773,6 +779,11 @@ impl SymbolTable {
                 &Type::create_constant("Int".to_string()),
                 location,
             ),
+            (Pattern::Char(_), _) => self.unify(
+                target_ty,
+                &Type::create_constant("Char".to_string()),
+                location,
+            ),
             (Pattern::Boolean(_), _) => self.unify(
                 target_ty,
                 &Type::create_constant("Bool".to_string()),
@@ -849,53 +860,25 @@ impl SymbolTable {
                         location,
                         format!("Enum constructor not found for {}", name),
                     )),
-                }?;
+                }?.clone();
 
-                // The order of generics correspond to the order of the types in the return
-                // constructor.
-                // TODO: The type must be at least partially known at this point.
-                // Consider if this requirement is necessary.
-                let finalized_target = self.close_type(target_ty)?;
-                let instantiated_generics = match finalized_target.as_ref() {
-                    Type::Constructor(Constructor { type_vec, .. }) => type_vec,
-                    _ => {
-                        return Err(TypeInferenceError::new(
-                            ErrorKind::TypeMismatch,
-                            location,
-                            format!("Type must be known at this point: {}", target_ty),
-                        ));
-                    }
+
+                let instantiated_variant_cons = variant_cons.instantiate()?;
+                let variant_type = match instantiated_variant_cons.as_ref() {
+                    Type::Constructor(ref cons) => cons,
+                    _ => unreachable!("Is handled above")
                 };
 
-                // Generic name -> Actual type
-                let generics: HashMap<String, Rc<Type>> = variant_cons
-                    .generics
-                    .iter()
-                    .map(|g| g.name.clone())
-                    .zip(instantiated_generics.iter().cloned())
-                    .collect::<HashMap<_, _>>();
+                // Variant constructor is Cons[EnumType, Params...]
+                let mut iter_tmp = variant_type.type_vec.iter();
+                let enum_type = iter_tmp.next().expect("Enum variant constructor always has at least one type, and that is a return type == enum type");
+                let variant_params = iter_tmp;
 
-                let cons_inst = variant_cons.ty.fill_types(&generics)?;
-                debug!(
-                    "Instantiated enum variant pattern as constructor: {}",
-                    cons_inst
-                );
 
-                // Now we have the type of the constructor,
-                // we can check the types of the patterns
-                let cons = match cons_inst.as_ref() {
-                    Type::Constructor(cons) => cons,
-                    _ => {
-                        return Err(TypeInferenceError::new(
-                            ErrorKind::TypeMismatch,
-                            location,
-                            format!("Expected enum variant instance, got {}", cons_inst),
-                        ));
-                    }
-                };
+                self.unify(target_ty, &enum_type, location)?;
 
-                let params = cons.type_vec[1..].iter();
-                for (pattern, ty) in patterns.iter().zip(params) {
+                for (pattern, ty) in patterns.iter().zip(variant_params) {
+                    debug!("Unifying pattern {} with type {}", pattern, ty);
                     self.unify_pattern(pattern, ty, location)?;
                 }
                 Ok(())
@@ -936,9 +919,17 @@ impl SymbolTable {
         match ty.as_ref() {
             Type::TypeVar(TypeVar(id)) => {
                 let t = self.unif_table.get(&TypeVar(*id)).ok_or_else(|| {
-                    panic!(
-                        "Type variable {} not found in unification table, this should not happen",
-                        id
+                    // TODO: We need to make this message way more friendly.
+                    // This can happen for example here:
+                    // ```
+                    // let f = |x| { match x { None => 1, Some(y) => y } };
+                    // ```
+                    // We cannot infer the types if `f` is not used anywhere else.
+                    // The message should reflect that we need additional type annotations.
+                    TypeInferenceError::new(
+                        ErrorKind::UnificationError,
+                        Location::new(0, 0),
+                        format!("Type variable T{} not found in unification table, we are most likely missing a type annotation and can't infere the types", id),
                     )
                 })?;
                 self.close_type(t)
@@ -2066,5 +2057,52 @@ fn main(): Int = {
         assert!(decls[0].to_string().contains(
             "let f: Function[Int, Int, Int] = fn AnonymousFunction(x: Int, y: Int): Int ="
         ));
+    }
+
+    #[test]
+    fn test_lambda_with_complicated_types_inside() {
+        init();
+        let decls = infer_module(
+            "
+enum Result[T, E] {
+    Ok(T),
+    Err(E),
+}
+
+fn main(): Int = {
+    let f = |x| {
+        match x {
+            Ok(y) => y,
+            Err(z) => 0, // Because of this, we can't know the type of E, hence it should fail.
+        }
+    }(Ok(1));
+    1
+}
+");
+        assert!(decls.is_err());
+
+
+        let decls = infer_module(
+            "
+enum Result[T, E] {
+    Ok(T),
+    Err(E),
+}
+
+fn foo(x: Result[Int, Bool]): Int = 1
+
+fn main(): Int = {
+    let f = |x| {
+        let xxx = foo(x); // Here we 'force' the type of E to be Bool
+        match x {
+            Ok(y) => y,
+            Err(z) => 0, 
+        }
+    }(Ok(1));
+    1
+}
+");
+        assert!(decls.is_ok());
+
     }
 }

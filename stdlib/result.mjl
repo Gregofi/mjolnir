@@ -4,4 +4,15 @@ enum Result[O, E] {
 }
 
 impl Result[O, E] {
+    fn is_ok(): Bool = match self {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+
+    fn is_err(): Bool = self.is_ok() == false
+
+    fn ok_or[O](val: O): O = match self {
+        Ok(x) => x,
+        Err(_) => val,
+    }
 }

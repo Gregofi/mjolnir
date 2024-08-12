@@ -43,7 +43,7 @@ impl List[T] {
 
     fn contains(x: T): Bool = self.find(x).is_some()
 
-    fn map(fun: (T) => T): List[T] = match self {
+    fn map[Q](fun: (T) => Q): List[Q] = match self {
         Cons(head, tail) => Cons(fun(head), tail.map(fun)),
         Nil => Nil(),
     }
@@ -67,4 +67,6 @@ impl List[T] {
     })
 
     fn reverse(): List[T] = self.fold_left(Nil(), Cons)
+
+    fn length(): Int = self.fold_left(0, |x, acc| { acc + 1 })
 }

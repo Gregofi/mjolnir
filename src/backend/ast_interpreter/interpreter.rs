@@ -396,6 +396,9 @@ impl Interpreter {
         match (pattern, &**match_target) {
             (Pattern::Wildcard, _) => Some(HashMap::new()),
             (Pattern::Int(pval), Value::Integer(vval)) if pval == vval => Some(HashMap::new()),
+            (Pattern::Char(pval), Value::Char(vval)) if pval == vval => {
+                Some(HashMap::new())
+            }
             (Pattern::Boolean(pval), Value::Bool(vval)) if pval == vval => Some(HashMap::new()),
             (
                 Pattern::Struct {
@@ -1241,6 +1244,44 @@ fn main(): Int = {
 ",
         )
         .unwrap();
+        let mut interpreter = Interpreter::new(ast);
+        assert_eq!(interpreter.interpret().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_match_1() {
+        let ast = fe_pass_one_file(
+            "
+fn main(): Int = match 5 {
+    0 => 0,
+    1 => 1,
+    2 => 2,
+    3 => 3,
+    4 => 4,
+    5 => 5,
+    6 => 6,
+    7 => 7,
+    8 => 8,
+    9 => 9,
+    _ => 10,
+}
+").unwrap();
+        let mut interpreter = Interpreter::new(ast);
+        assert_eq!(interpreter.interpret().unwrap(), 5);
+    }
+
+    #[test]
+    fn test_match_chars() {
+        let ast = fe_pass_one_file(
+            "
+fn main(): Int = match 'c' {
+    'a' => 1,
+    'b' => 2,
+    'c' => 3,
+    'd' => 4,
+    _ => 5,
+}
+").unwrap();
         let mut interpreter = Interpreter::new(ast);
         assert_eq!(interpreter.interpret().unwrap(), 3);
     }

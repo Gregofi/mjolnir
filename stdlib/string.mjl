@@ -6,6 +6,34 @@ struct String {
     data: List[Char],
 }
 
+fn char_to_int(c: Char): Result[Int, Unit] = match c {
+    '0' => Ok(0),
+    '1' => Ok(1),
+    '2' => Ok(2),
+    '3' => Ok(3),
+    '4' => Ok(4),
+    '5' => Ok(5),
+    '6' => Ok(6),
+    '7' => Ok(7),
+    '8' => Ok(8),
+    '9' => Ok(9),
+    _ => Err(()),
+}
+
+fn int_to_char(num: Int): Result[Char, Unit] = match num {
+    0 => Ok('0'),
+    1 => Ok('1'),
+    2 => Ok('2'),
+    3 => Ok('3'),
+    4 => Ok('4'),
+    5 => Ok('5'),
+    6 => Ok('6'),
+    7 => Ok('7'),
+    8 => Ok('8'),
+    9 => Ok('9'),
+    _ => Err(()),
+}
+
 impl String {
     fn print(): Unit = {
         match self.data {
@@ -21,6 +49,32 @@ impl String {
         self.print();
         putchar('\n');
     }
+
+    fn _parse_int(acc: Int): Result[Int, Unit] = match self.data {
+        Cons(head, tail) => match char_to_int(head) {
+            Ok(num) => &String { data: tail }._parse_int(acc * 10 + num),
+            Err(e) => Err(e),
+        },
+        Nil => Ok(acc),
+    }
+
+    fn parse_int(): Result[Int, Unit] = self._parse_int(0)
+
+    fn length(): Int = self.data.length()
 }
 
 fn from_list(lst: List[Char]): String = &String { data: lst }
+
+/// Converts a number to a list of its decimal digits.
+fn decimals(n: Int): List[Int] = match n {
+    0 => Cons(0, Nil()),
+    _ => Cons(n % 10, decimals(n / 10)),
+}
+
+fn int_to_string(number: Int): String =
+    from_list(
+        decimals(number).map(|decimal| {
+            int_to_char(decimal).ok_or('x')
+        })
+    )
+

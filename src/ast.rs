@@ -57,6 +57,7 @@ pub struct MatchArm<Ex> {
 pub enum Pattern {
     Wildcard, // _
     Int(i64),
+    Char(u8),
     Boolean(bool),
     String(String),
     // Foo{foo, bar}
@@ -77,6 +78,7 @@ impl Display for Pattern {
         match self {
             Pattern::Wildcard => write!(f, "_"),
             Pattern::Int(x) => write!(f, "{}", x),
+            Pattern::Char(x) => write!(f, "{}", x),
             Pattern::Boolean(x) => write!(f, "{}", x),
             Pattern::String(x) => write!(f, "{}", x),
             Pattern::Struct { name, fields } => {
