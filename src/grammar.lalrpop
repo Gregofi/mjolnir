@@ -405,7 +405,7 @@ FunCallExpr: Expr = {
 Arguments: Vec<Expr> = Separated<Expr, COMMA>;
 
 IfExpr: Expr = {
-    <l: @L> IF <cond: Expr> LBRACE <then: Expr> RBRACE ELSE LBRACE <els: Expr> RBRACE <r: @R> => Expr {
+    <l: @L> IF <cond: Expr> <then: Compound> ELSE <els: Compound> <r: @R> => Expr {
         node: ExprKind::If { cond: Box::new(cond), then: Box::new(then), els: Box::new(els) },
         location: Location::new(l, r),
         inferred_ty: None,
