@@ -35,10 +35,22 @@ impl List[T] {
         Nil => Cons(x, Nil()),
     }
 
+    fn concat(other: List[T]): List[T] = self.fold_right(other, Cons)
+
     fn find(x: T): Option[T] = match self {
         Cons(head, _) if head == x => Some(head),
         Cons(_, tail) => tail.find(x),
         _ => None(),
+    }
+
+    fn take(n: Int): List[T] = match self {
+        Cons(head, tail) if n > 0 => Cons(head, tail.take(n - 1)),
+        _ => Nil(),
+    }
+
+    fn drop(n: Int): List[T] = match self {
+        Cons(_, tail) if n > 0 => tail.drop(n - 1),
+        _ => self,
     }
 
     fn contains(x: T): Bool = self.find(x).is_some()
