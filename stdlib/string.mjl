@@ -61,6 +61,20 @@ impl String {
     fn parse_int(): Result[Int, Unit] = self._parse_int(0)
 
     fn length(): Int = self.data.length()
+
+    fn appended(c: Char): String = &String { data: self.data.appended(c) }
+
+    fn concat(other: String): String = &String { data: self.data.concat(other.data) }
+}
+
+fn join(lst: List[String], sep: Char): String = match lst {
+    Cons(head, tail) => {
+        match tail {
+            Cons(_, _) => head.appended(sep).concat(join(tail, sep)),
+            Nil => head,
+        }
+    },
+    Nil => &String { data: Nil() },
 }
 
 fn from_list(lst: List[Char]): String = &String { data: lst }
@@ -68,7 +82,16 @@ fn from_list(lst: List[Char]): String = &String { data: lst }
 /// Converts a number to a list of its decimal digits.
 fn decimals(n: Int): List[Int] = match n {
     0 => Cons(0, Nil()),
-    _ => Cons(n % 10, decimals(n / 10)),
+    _ => {
+        let digit = n % 10;
+        let rest = n / 10;
+        if rest == 0 {
+            Cons(digit, Nil())
+        } else {
+            // ineffective
+            decimals(rest).appended(digit)
+        }
+    },
 }
 
 fn int_to_string(number: Int): String =

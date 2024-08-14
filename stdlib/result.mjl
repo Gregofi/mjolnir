@@ -15,4 +15,19 @@ impl Result[O, E] {
         Ok(x) => x,
         Err(_) => val,
     }
+
+    fn ok_or_else[O](fun: () => O): O = match self {
+        Ok(x) => x,
+        Err(_) => fun(),
+    }
+
+    fn map[Q](fun: (O) => Q): Result[Q, E] = match self {
+        Ok(x) => Ok(fun(x)),
+        Err(e) => Err(e),
+    }
+
+    fn flat_map[Q](fun: (O) => Result[Q, E]): Result[Q, E] = match self {
+        Ok(x) => fun(x),
+        Err(e) => Err(e),
+    }
 }

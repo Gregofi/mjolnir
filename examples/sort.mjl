@@ -1,0 +1,47 @@
+import { String, int_to_string, join } from "../stdlib/string.mjl";
+import { List } from "../stdlib/list.mjl";
+import { Option } from "../stdlib/option.mjl";
+import { Result } from "../stdlib/result.mjl";
+import { readline } from "../stdlib/io.mjl";
+
+fn insert_sorted(n: Int, lst: List[Int]): List[Int] = match lst {
+    Nil() => Cons(n, Nil()),
+    Cons(head, tail) if n < head => Cons(n, Cons(head, tail)),
+    Cons(head, tail) => Cons(head, insert_sorted(n, tail)),
+}
+
+fn insertsort(lst: List[Int]): List[Int] = {
+    match lst {
+        Nil() => Nil(),
+        Cons(head, tail) => insert_sorted(head, insertsort(tail)),
+    }
+}
+
+fn read_numbers(n: Int): Result[List[Int], Unit] = {
+    if n == 0 {
+        Ok(Nil())
+    } else {
+        let num = readline().parse_int();
+        match num {
+            Ok(num) => {
+                let lst = read_numbers(n - 1);
+                match lst {
+                    Ok(lst) => Ok(Cons(num, lst)),
+                    Err(e) => Err(e),
+                }
+            },
+            Err(e) => Err(e),
+        }
+    }
+}
+
+
+fn main(): Int = {
+    let count = readline().parse_int().ok_or(0);
+    let numbers = read_numbers(count).ok_or(Nil());
+    let sorted = insertsort(numbers);
+    let sorted_str = sorted.map(int_to_string);
+    let string = join(sorted_str, ' ');
+    string.println();
+    0
+}
